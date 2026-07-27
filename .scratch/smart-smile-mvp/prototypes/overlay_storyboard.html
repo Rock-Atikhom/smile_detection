@@ -1,0 +1,58 @@
+<!doctype html>
+<!-- THROWAWAY PROTOTYPE — Smart Smile overlay storyboard. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Smile Overlay Prototype</title>
+<style>
+  :root { color-scheme: dark; font: 16px/1.35 system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #15202b; overflow: hidden; }
+  .preview { position: relative; min-height: 100vh; background: linear-gradient(135deg, #40566b, #1c2834 55%, #596c71); }
+  .preview::before { content: "mirrored camera preview"; position: absolute; inset: 0; display: grid; place-items: center; color: #cbd5df; font-size: clamp(1rem, 3vw, 2rem); opacity: .3; }
+  .status, .gauge, .debug, .confirm { position: absolute; z-index: 2; background: rgba(8, 14, 20, .78); border: 1px solid rgba(255,255,255,.25); border-radius: .65rem; }
+  .status { top: 4%; left: 4%; padding: .6rem .8rem; max-width: 70%; }
+  .guide { position: absolute; z-index: 1; left: 20%; right: 20%; top: 12%; bottom: 18%; border: 2px solid #f6f8fb; border-radius: 18%; opacity: .8; }
+  .guide.good { border-color: #4ade80; }
+  .guide.warn { border-color: #fbbf24; }
+  .guide.bad { border-color: #fb7185; }
+  .gauge { left: 50%; bottom: 4%; transform: translateX(-50%); width: min(92%, 34rem); padding: .65rem .8rem; }
+  .bar { height: .65rem; margin-top: .45rem; background: #364554; border-radius: 99px; overflow: hidden; }
+  .bar > i { display: block; width: 64%; height: 100%; background: #4ade80; }
+  .countdown { position: absolute; z-index: 3; inset: 0; display: grid; place-items: center; font-size: clamp(5rem, 20vw, 12rem); font-weight: 800; text-shadow: 0 4px 22px #000; }
+  .debug { top: 4%; right: 4%; width: min(28%, 22rem); min-width: 14rem; padding: .75rem; font: .78rem/1.45 ui-monospace, monospace; }
+  .confirm { inset: auto 4% 4% auto; padding: .8rem 1rem; border-color: #4ade80; }
+  .controls { position: fixed; z-index: 5; left: 50%; bottom: .6rem; transform: translateX(-50%); display: flex; gap: .35rem; opacity: .85; }
+  button { color: white; background: #263746; border: 1px solid #91a4b5; border-radius: .4rem; padding: .35rem .6rem; cursor: pointer; }
+  @media (max-width: 700px) { .debug { width: 92%; min-width: 0; top: 18%; } }
+</style>
+<main class="preview" id="preview">
+  <div class="guide" id="guide"></div>
+  <div class="status" id="status"></div>
+  <div class="gauge" id="gauge">Smile <strong id="score"></strong><div class="bar"><i id="progress"></i></div><small>Verification progress</small></div>
+  <div class="countdown" id="countdown"></div>
+  <div class="debug" id="debug"></div>
+  <div class="confirm" id="confirm"></div>
+</main>
+<nav class="controls" aria-label="prototype variants">
+  <button data-variant="normal">normal</button><button data-variant="debug">debug</button><button data-variant="warning">warning</button><button data-variant="countdown">countdown</button><button data-variant="cooldown">cooldown</button>
+</nav>
+<script>
+  const variant = new URLSearchParams(location.search).get('variant') || 'normal';
+  const configs = {
+    normal: { text: 'Keep smiling.', guide: 'good', score: '0.72', progress: '64%', debug: '', countdown: '', confirm: '' },
+    debug: { text: 'Keep smiling.', guide: 'good', score: '0.72', progress: '64%', debug: 'state=VERIFYING\nreason=smile_needed\nfaces=1\ncontinuity=match\nraw=0.75 smoothed=0.72\nthresholds=0.60 / 0.45\nluma=110 sharpness=172\nresolution=1280x720 fps=27.4\ngeneration=4 age=42ms', countdown: '', confirm: '' },
+    warning: { text: 'Only one person, please.', guide: 'bad', score: '—', progress: '0%', debug: '', countdown: '', confirm: '' },
+    countdown: { text: 'Hold still.', guide: 'good', score: '0.76', progress: '100%', debug: '', countdown: '3', confirm: '' },
+    cooldown: { text: 'Photo saved', guide: 'good', score: '—', progress: '0%', debug: '', countdown: '', confirm: 'Photo saved · ready again in 3s' }
+  };
+  const c = configs[variant] || configs.normal;
+  document.querySelector('#status').textContent = c.text;
+  document.querySelector('#guide').classList.add(c.guide);
+  document.querySelector('#score').textContent = c.score;
+  document.querySelector('#progress').style.width = c.progress;
+  document.querySelector('#debug').textContent = c.debug;
+  document.querySelector('#countdown').textContent = c.countdown;
+  document.querySelector('#confirm').textContent = c.confirm;
+  document.querySelectorAll('button').forEach((button) => {
+    button.onclick = () => { location.search = `?variant=${button.dataset.variant}`; };
+  });
+</script>
