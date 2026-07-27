@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-arm64:
+    name: macOS ARM64 / Python 3.12.10
+    runs-on: macos-14
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Install exact Python runtime
+        run: uv python install 3.12.10
+
+      - name: Synchronize locked environment
+        run: uv sync --frozen --all-groups
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Check formatting
+        run: uv run ruff format --check src tests
+
+      - name: Run lint checks
+        run: uv run ruff check src tests
+
+      - name: Run type checks
+        run: uv run mypy src tests
