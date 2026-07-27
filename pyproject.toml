@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "smart-smile"
+version = "0.1.0"
+description = "Local, privacy-preserving smile capture application"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "mediapipe==0.10.35",
+  "numpy==1.26.4",
+  "opencv-contrib-python==4.11.0.86",
+]
+
+[project.scripts]
+smart-smile = "smart_smile.cli:main"
+
+[dependency-groups]
+dev = [
+  "mypy==1.15.0",
+  "pytest==8.3.5",
+  "ruff==0.11.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/smart_smile"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

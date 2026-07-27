@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] A clean supported Python environment installs the approved direct dependencies without a conflicting OpenCV wheel family.
 - [ ] Startup verifies the Face Landmarker model checksum and refuses missing or mismatched assets with a stable safe error.
