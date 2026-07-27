@@ -165,6 +165,7 @@ def test_decoded_frame_shape_is_authoritative_and_warmup_lasts_two_seconds() -> 
 
     assert (first.width, first.height, first.sequence) == (640, 480, 1)
     assert first.warming_up is True
+    assert first.pixels.flags.writeable is False
     assert (second.width, second.height, second.sequence) == (1280, 720, 2)
     assert second.warming_up is False
     assert second.measured_fps == pytest.approx(1.0 / 0.6)
@@ -296,7 +297,9 @@ def test_camera_lane_logs_property_outcomes_delivered_mode_and_measured_fps() ->
     )
     stream = io.StringIO()
     logger = logging.Logger("camera-contract")
-    logger.addHandler(logging.StreamHandler(stream))
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+    logger.addHandler(handler)
     lane = CameraLane(
         index=0,
         factory=FakeCaptureFactory([capture]),
@@ -310,7 +313,7 @@ def test_camera_lane_logs_property_outcomes_delivered_mode_and_measured_fps() ->
     lane.join(timeout=1.0)
 
     log = stream.getvalue()
-    assert "camera_property name=height requested=720.00 accepted=False" in log
+    assert "WARNING camera_property name=height requested=720.00 accepted=False" in log
     assert "camera_mode delivered=640x480" in log
     assert "camera_metrics delivered=640x480 measured_fps=" in log
 

@@ -33,6 +33,11 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class TimingConfig:
+    camera_warmup_seconds: float = 2.0
+
+
+@dataclass(frozen=True)
 class UiConfig:
     debug: bool = False
 
@@ -43,6 +48,7 @@ class ApplicationConfig:
     vision: VisionConfig = field(default_factory=VisionConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    timing: TimingConfig = field(default_factory=TimingConfig)
     ui: UiConfig = field(default_factory=UiConfig)
 
 
@@ -120,7 +126,7 @@ def load_config(
 ) -> ApplicationConfig:
     defaults = ApplicationConfig()
     document = _read_document(path) if path is not None else {}
-    allowed_sections = {"camera", "vision", "storage", "logging", "ui"}
+    allowed_sections = {"camera", "vision", "storage", "logging", "timing", "ui"}
     unknown_sections = set(document) - allowed_sections
     if unknown_sections:
         name = sorted(unknown_sections)[0]
@@ -147,7 +153,23 @@ def load_config(
     vision_values = _section(document, "vision", {"model_path"})
     storage_values = _section(document, "storage", {"output_dir"})
     logging_values = _section(document, "logging", {"directory", "level"})
+    timing_values = _section(document, "timing", {"camera_warmup_seconds"})
     ui_values = _section(document, "ui", {"debug"})
+
+    camera_warmup_seconds = timing_values.get(
+        "camera_warmup_seconds",
+        defaults.timing.camera_warmup_seconds,
+    )
+    if (
+        isinstance(camera_warmup_seconds, bool)
+        or not isinstance(camera_warmup_seconds, int | float)
+        or not 0 <= camera_warmup_seconds <= 30
+    ):
+        raise StartupError(
+            "CONFIG_INVALID",
+            "timing.camera_warmup_seconds must be a number from 0 through 30",
+            "Choose a warm-up duration from 0 through 30 seconds.",
+        )
 
     logging_level = _string(
         logging_values,
@@ -196,5 +218,6 @@ def load_config(
             ),
             level=logging_level,
         ),
+        timing=TimingConfig(camera_warmup_seconds=float(camera_warmup_seconds)),
         ui=UiConfig(debug=debug_override or debug),
     )

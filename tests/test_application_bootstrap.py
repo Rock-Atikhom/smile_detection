@@ -277,6 +277,41 @@ def test_cli_overrides_camera_and_debug_mode(
     assert shell.context.config.ui.debug is True
 
 
+def test_camera_warmup_duration_is_loaded_from_timing_configuration(tmp_path: Path) -> None:
+    config = write_valid_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8") + "\n\n[timing]\ncamera_warmup_seconds = 1.25\n",
+        encoding="utf-8",
+    )
+    shell = RecordingShell()
+
+    exit_code = run_application(["--config", str(config)], shell=shell)
+
+    assert exit_code == 0
+    assert shell.context is not None
+    assert shell.context.config.timing.camera_warmup_seconds == 1.25
+
+
+def test_out_of_range_camera_warmup_fails_before_shell_launch(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = write_valid_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8") + "\n\n[timing]\ncamera_warmup_seconds = -0.1\n",
+        encoding="utf-8",
+    )
+    shell = RecordingShell()
+
+    exit_code = run_application(["--config", str(config)], shell=shell)
+
+    error_output = capsys.readouterr().err
+    assert exit_code == 2
+    assert shell.context is None
+    assert "timing.camera_warmup_seconds" in error_output
+    assert "0 through 30" in error_output
+
+
 def test_checksum_mismatch_fails_with_safe_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from smart_smile.app import ApplicationContext
 from smart_smile.camera import (
     CameraEvent,
+    CameraFailureEvent,
     CameraFrame,
     CameraLane,
     CaptureFactory,
@@ -46,7 +47,7 @@ class OpenCvShell:
         debug: bool,
         replacements: int,
     ) -> None:
-        if event is not None and event.kind == "failure":
+        if isinstance(event, CameraFailureEvent):
             cv2.rectangle(canvas, (40, 40), (canvas.shape[1] - 40, 180), (45, 45, 180), -1)
             cv2.putText(
                 canvas,
@@ -60,7 +61,7 @@ class OpenCvShell:
             )
             cv2.putText(
                 canvas,
-                event.guidance or "Check camera access, then restart Smart Smile.",
+                event.guidance,
                 (70, 140),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.52,
@@ -109,6 +110,7 @@ class OpenCvShell:
             system=self._system,
             mailbox=mailbox,
             events=events,
+            warmup_seconds=context.config.timing.camera_warmup_seconds,
         )
         latest_frame: CameraFrame | None = None
         latest_event: CameraEvent | None = None

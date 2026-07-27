@@ -15,5 +15,9 @@ output_dir = "output"
 directory = "logs"
 level = "INFO"
 
+[timing]
+# Preview stays active, but Participant evidence cannot advance during warm-up.
+camera_warmup_seconds = 2.0
+
 [ui]
 debug = false

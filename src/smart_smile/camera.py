@@ -87,11 +87,17 @@ class CameraFrame:
 
 
 @dataclass(frozen=True)
-class CameraEvent:
-    kind: str
-    code: str | None = None
-    guidance: str | None = None
-    backend: str | None = None
+class CameraOpenedEvent:
+    backend: str
+
+
+@dataclass(frozen=True)
+class CameraFailureEvent:
+    code: str
+    guidance: str
+
+
+type CameraEvent = CameraOpenedEvent | CameraFailureEvent
 
 
 class LatestFrameMailbox:
@@ -134,11 +140,13 @@ class CameraDevice:
         system: str,
         clock_ns: Callable[[], int] = time.monotonic_ns,
         generation: int = 1,
+        warmup_seconds: float = 2.0,
     ) -> None:
         self._factory = factory
         self._system = system
         self._clock_ns = clock_ns
         self._generation = generation
+        self._warmup_ns = int(warmup_seconds * 1_000_000_000)
         self._capture: VideoCapture | None = None
         self._ready_ns = 0
         self._sequence = 0
@@ -164,7 +172,7 @@ class CameraDevice:
                 )
             )
             self._capture = capture
-            self._ready_ns = self._clock_ns() + 2_000_000_000
+            self._ready_ns = self._clock_ns() + self._warmup_ns
             return CameraOpened(
                 backend=capture.getBackendName(),
                 requested_width=1280,
@@ -192,6 +200,7 @@ class CameraDevice:
             raise CameraResolutionError((width, height))
 
         captured_ns = self._clock_ns()
+        pixels.setflags(write=False)
         self._timestamps.append(captured_ns)
         measured_fps = 0.0
         if len(self._timestamps) > 1:
@@ -230,6 +239,7 @@ class CameraLane:
         factory: CaptureFactory = open_cv_capture,
         system: str,
         generation: int = 1,
+        warmup_seconds: float = 2.0,
         logger: logging.Logger | None = None,
     ) -> None:
         self._index = index
@@ -238,6 +248,7 @@ class CameraLane:
         self._factory = factory
         self._system = system
         self._generation = generation
+        self._warmup_seconds = warmup_seconds
         self._logger = logger or logging.getLogger("smart_smile")
         self._stop_requested = Event()
         self._thread = Thread(target=self._run, name="smart-smile-camera", daemon=True)
@@ -259,10 +270,11 @@ class CameraLane:
             factory=self._factory,
             system=self._system,
             generation=self._generation,
+            warmup_seconds=self._warmup_seconds,
         )
         try:
             opened = device.open(index=self._index)
-            self._events.put(CameraEvent(kind="opened", backend=opened.backend))
+            self._events.put(CameraOpenedEvent(backend=opened.backend))
             self._logger.info(
                 "camera_opened backend=%s requested=%dx%d@%d",
                 opened.backend,
@@ -271,7 +283,16 @@ class CameraLane:
                 opened.requested_fps,
             )
             for outcome in opened.property_outcomes:
-                self._logger.info(
+                materially_mismatched = abs(outcome.reported - outcome.requested) > max(
+                    1.0,
+                    outcome.requested * 0.05,
+                )
+                log_property = (
+                    self._logger.warning
+                    if not outcome.accepted or materially_mismatched
+                    else self._logger.info
+                )
+                log_property(
                     "camera_property name=%s requested=%.2f accepted=%s reported=%.2f",
                     outcome.name,
                     outcome.requested,
@@ -300,8 +321,7 @@ class CameraLane:
                     )
         except CameraProblem as error:
             self._events.put(
-                CameraEvent(
-                    kind="failure",
+                CameraFailureEvent(
                     code=error.code,
                     guidance=error.guidance,
                 )
