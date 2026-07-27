@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-import hashlib
 import importlib.metadata
+import platform
+import sys
 from pathlib import Path
 
+import cv2
 import pytest
 
 from smart_smile.app import ApplicationContext, run_application
+from smart_smile.shell import OpenCvShell
+
+APPROVED_MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "face_landmarker.task"
 
 
 class RecordingShell:
@@ -23,9 +28,6 @@ class InterruptingShell:
 
 
 def write_valid_config(root: Path) -> Path:
-    model = root / "face_landmarker.task"
-    model.write_bytes(b"fixed-test-model")
-    checksum = hashlib.sha256(model.read_bytes()).hexdigest()
     config = root / "config.toml"
     config.write_text(
         f"""
@@ -33,8 +35,7 @@ def write_valid_config(root: Path) -> Path:
 index = 0
 
 [vision]
-model_path = "face_landmarker.task"
-model_sha256 = "{checksum}"
+model_path = "{APPROVED_MODEL_PATH}"
 
 [storage]
 output_dir = "photos"
@@ -124,7 +125,13 @@ def test_missing_model_fails_with_safe_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     config = write_valid_config(tmp_path)
-    (tmp_path / "face_landmarker.task").unlink()
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            str(APPROVED_MODEL_PATH),
+            str(tmp_path / "missing-face-landmarker.task"),
+        ),
+        encoding="utf-8",
+    )
     shell = RecordingShell()
 
     exit_code = run_application(["--config", str(config)], shell=shell)
@@ -177,14 +184,10 @@ def test_conflicting_opencv_distribution_fails_before_shell_launch(
     assert "opencv-python" in error_output
 
 
-def test_missing_required_configuration_key_names_the_key(
+def test_missing_selected_configuration_fails_with_actionable_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    config = write_valid_config(tmp_path)
-    config.write_text(
-        config.read_text(encoding="utf-8").replace('level = "INFO"\n', ""),
-        encoding="utf-8",
-    )
+    config = tmp_path / "missing.toml"
     shell = RecordingShell()
 
     exit_code = run_application(["--config", str(config)], shell=shell)
@@ -193,7 +196,7 @@ def test_missing_required_configuration_key_names_the_key(
     assert exit_code == 2
     assert shell.context is None
     assert "CONFIG_INVALID" in error_output
-    assert "logging.level" in error_output
+    assert str(config) in error_output
 
 
 def test_invalid_logging_level_fails_before_shell_launch(
@@ -253,7 +256,15 @@ def test_checksum_mismatch_fails_with_safe_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     config = write_valid_config(tmp_path)
-    (tmp_path / "face_landmarker.task").write_bytes(b"changed-model")
+    changed_model = tmp_path / "changed-model.task"
+    changed_model.write_bytes(b"changed-model")
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            str(APPROVED_MODEL_PATH),
+            str(changed_model),
+        ),
+        encoding="utf-8",
+    )
     shell = RecordingShell()
 
     exit_code = run_application(["--config", str(config)], shell=shell)
@@ -273,3 +284,149 @@ def test_terminal_interrupt_exits_without_traceback(
 
     assert exit_code == 130
     assert "exit_requested" in capsys.readouterr().err
+
+
+def test_operator_cannot_override_approved_model_checksum(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = write_valid_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            f'model_path = "{APPROVED_MODEL_PATH}"',
+            f'model_path = "{APPROVED_MODEL_PATH}"\nmodel_sha256 = "{"0" * 64}"',
+        ),
+        encoding="utf-8",
+    )
+    shell = RecordingShell()
+
+    exit_code = run_application(["--config", str(config)], shell=shell)
+
+    error_output = capsys.readouterr().err
+    assert exit_code == 2
+    assert shell.context is None
+    assert "CONFIG_INVALID" in error_output
+    assert "vision.model_sha256" in error_output
+
+
+def test_partial_configuration_inherits_built_in_defaults(tmp_path: Path) -> None:
+    config = tmp_path / "partial.toml"
+    config.write_text(
+        f"""
+[storage]
+output_dir = "{tmp_path / "photos"}"
+
+[logging]
+directory = "{tmp_path / "logs"}"
+""".strip(),
+        encoding="utf-8",
+    )
+    shell = RecordingShell()
+
+    exit_code = run_application(["--config", str(config)], shell=shell)
+
+    assert exit_code == 0
+    assert shell.context is not None
+    assert shell.context.config.camera.index == 0
+    assert shell.context.config.vision.model_path == APPROVED_MODEL_PATH
+    assert shell.context.config.ui.debug is False
+
+
+def test_no_configuration_uses_built_in_defaults() -> None:
+    shell = RecordingShell()
+
+    exit_code = run_application([], shell=shell)
+
+    assert exit_code == 0
+    assert shell.context is not None
+    assert shell.context.config.camera.index == 0
+    assert shell.context.config.vision.model_path == APPROVED_MODEL_PATH
+
+
+def test_unsupported_intel_macos_fails_with_actionable_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = write_valid_config(tmp_path)
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+
+    exit_code = run_application(["--config", str(config)], shell=RecordingShell())
+
+    error_output = capsys.readouterr().err
+    assert exit_code == 5
+    assert "UNSUPPORTED_PLATFORM" in error_output
+    assert "Apple Silicon" in error_output
+
+
+def test_macos_below_locked_opencv_boundary_fails_safely(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = write_valid_config(tmp_path)
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(platform, "mac_ver", lambda: ("12.7.6", ("", "", ""), ""))
+
+    exit_code = run_application(["--config", str(config)], shell=RecordingShell())
+
+    error_output = capsys.readouterr().err
+    assert exit_code == 5
+    assert "UNSUPPORTED_PLATFORM" in error_output
+    assert "macOS 13 or later" in error_output
+
+
+def test_wrong_python_line_fails_with_actionable_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = write_valid_config(tmp_path)
+    monkeypatch.setattr(sys, "version_info", (3, 11, 9))
+
+    exit_code = run_application(["--config", str(config)], shell=RecordingShell())
+
+    error_output = capsys.readouterr().err
+    assert exit_code == 5
+    assert "DEPENDENCY_VERSION" in error_output
+    assert "CPython 3.12" in error_output
+
+
+def test_missing_runtime_distribution_fails_with_actionable_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = write_valid_config(tmp_path)
+    real_version = importlib.metadata.version
+
+    def installed_version(distribution: str) -> str:
+        if distribution == "mediapipe":
+            raise importlib.metadata.PackageNotFoundError(distribution)
+        return real_version(distribution)
+
+    monkeypatch.setattr(importlib.metadata, "version", installed_version)
+
+    exit_code = run_application(["--config", str(config)], shell=RecordingShell())
+
+    error_output = capsys.readouterr().err
+    assert exit_code == 5
+    assert "DEPENDENCY_MISSING" in error_output
+    assert "mediapipe" in error_output
+
+
+@pytest.mark.parametrize("exit_key", [ord("q"), 27])
+def test_application_shell_exits_for_standard_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exit_key: int,
+) -> None:
+    config = write_valid_config(tmp_path)
+    monkeypatch.setattr(cv2, "imshow", lambda _name, _frame: None)
+    monkeypatch.setattr(cv2, "waitKey", lambda _delay: exit_key)
+    monkeypatch.setattr(cv2, "destroyWindow", lambda _name: None)
+
+    exit_code = run_application(["--config", str(config)], shell=OpenCvShell())
+
+    assert exit_code == 0

@@ -12,3 +12,7 @@
 - [ ] Unknown keys, malformed values, invalid ranges, and unusable output paths fail before camera startup with an actionable message.
 - [ ] Successful startup opens the application shell, initializes privacy-safe console and rotating JSONL logging, and exits cleanly with `q` or Escape.
 - [ ] Automated tests exercise successful startup and each startup-fatal category through the public application seam.
+
+## Implementation note
+
+The locked `opencv-contrib-python==4.11.0.86` ARM64 wheel is tagged `macosx_13_0_arm64`. The implemented startup boundary is therefore macOS 13+ on Apple Silicon, including the current macOS 26 MacBook. The planning promise of macOS 11+ must be reconciled before final native release validation; this slice does not falsely claim macOS 11/12 compatibility.
