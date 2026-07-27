@@ -9,6 +9,7 @@ import cv2
 import pytest
 
 from smart_smile.app import ApplicationContext, run_application
+from smart_smile.cli import main
 from smart_smile.shell import OpenCvShell
 
 APPROVED_MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "face_landmarker.task"
@@ -383,14 +384,14 @@ def test_wrong_python_line_fails_with_actionable_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = write_valid_config(tmp_path)
-    monkeypatch.setattr(sys, "version_info", (3, 11, 9))
+    monkeypatch.setattr(sys, "version_info", (3, 12, 11))
 
     exit_code = run_application(["--config", str(config)], shell=RecordingShell())
 
     error_output = capsys.readouterr().err
     assert exit_code == 5
     assert "DEPENDENCY_VERSION" in error_output
-    assert "CPython 3.12" in error_output
+    assert "CPython 3.12.10" in error_output
 
 
 def test_missing_runtime_distribution_fails_with_actionable_error(
@@ -430,3 +431,37 @@ def test_application_shell_exits_for_standard_keys(
     exit_code = run_application(["--config", str(config)], shell=OpenCvShell())
 
     assert exit_code == 0
+
+
+def test_real_cli_reports_dependency_import_failure_safely(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = write_valid_config(tmp_path)
+    real_import = importlib.import_module
+
+    def import_runtime_module(name: str) -> object:
+        if name == "cv2":
+            raise ImportError("broken cv2")
+        return real_import(name)
+
+    monkeypatch.setattr(importlib, "import_module", import_runtime_module)
+
+    exit_code = main(["--config", str(config)])
+
+    error_output = capsys.readouterr().err
+    assert exit_code == 5
+    assert "DEPENDENCY_IMPORT" in error_output
+    assert "cv2" in error_output
+
+
+def test_malformed_cli_value_has_stable_safe_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = run_application(["--camera", "not-a-number"], shell=RecordingShell())
+
+    error_output = capsys.readouterr().err
+    assert exit_code == 2
+    assert "CONFIG_INVALID" in error_output
+    assert "--camera" in error_output

@@ -14,13 +14,13 @@ Use one conservative, reproducible environment for the MVP:
 | NumPy | `numpy==1.26.4` | This release supports Python 3.9+, has Windows/macOS wheels, and avoids making the MVP depend on the NumPy 2 ABI transition. |
 | Face Landmarker asset | Vendor the bytes downloaded from Google's official `face_landmarker.task` URL; record and verify a project-owned SHA-256 | Google's guide requires a local compatible model path, but the official download URL uses `latest`, which is not an immutable semantic version. A checksum is therefore the reproducible identity. |
 | Windows | Windows 10/11 x86-64 | MediaPipe `0.10.35` publishes a `win_amd64` wheel. This matches the agreed i5 benchmark. |
-| macOS | macOS 11 or later on Apple Silicon (ARM64) | The current MediaPipe release publishes `macosx_11_0_arm64`, but no Intel (`x86_64`) macOS wheel. |
+| macOS | macOS 13 or later on Apple Silicon (ARM64) | MediaPipe publishes `macosx_11_0_arm64`, but the selected OpenCV contrib 4.11 wheel is `macosx_13_0_arm64`; the combined environment therefore has a macOS 13 floor. Neither selected line supplies the required Intel support combination. |
 
 Primary package metadata: [MediaPipe 0.10.35 on PyPI](https://pypi.org/project/mediapipe/0.10.35/), [OpenCV Python 4.11.0.86 on PyPI](https://pypi.org/project/opencv-contrib-python/4.11.0.86/), [NumPy 1.26.4 on PyPI](https://pypi.org/project/numpy/1.26.4/), and the official [Face Landmarker Python guide](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/python).
 
 ## Important platform conclusion
 
-“macOS” cannot presently mean every supported Mac architecture with one current MediaPipe pin. The files published for MediaPipe `0.10.35` include Windows x86-64 and macOS 11+ ARM64, but no macOS Intel wheel ([PyPI files](https://pypi.org/project/mediapipe/0.10.35/#files)). The MVP should therefore declare Apple Silicon as its supported macOS target. Supporting Intel Macs would be a separate compatibility investigation involving an older wheel or an unsupported source build; neither should be promised in the MVP.
+“macOS” cannot presently mean every Mac architecture or every MediaPipe-supported OS version with this combined pin set. MediaPipe `0.10.35` supplies a macOS 11+ ARM64 wheel but no macOS Intel wheel ([PyPI files](https://pypi.org/project/mediapipe/0.10.35/#files)); OpenCV contrib 4.11.0.86 supplies its ARM64 wheel with a macOS 13 tag. The MVP therefore declares macOS 13+ on Apple Silicon as its combined supported target. Supporting Intel Macs or macOS 11/12 would require a separate dependency investigation rather than an unsupported fallback.
 
 ## Installation and locking policy
 

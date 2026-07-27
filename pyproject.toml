@@ -7,7 +7,7 @@ name = "smart-smile"
 version = "0.1.0"
 description = "Local, privacy-preserving smile capture application"
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = "==3.12.10"
 dependencies = [
   "mediapipe==0.10.35",
   "numpy==1.26.4",

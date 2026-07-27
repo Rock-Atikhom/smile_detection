@@ -15,4 +15,4 @@
 
 ## Implementation note
 
-The locked `opencv-contrib-python==4.11.0.86` ARM64 wheel is tagged `macosx_13_0_arm64`. The implemented startup boundary is therefore macOS 13+ on Apple Silicon, including the current macOS 26 MacBook. The planning promise of macOS 11+ must be reconciled before final native release validation; this slice does not falsely claim macOS 11/12 compatibility.
+The locked `opencv-contrib-python==4.11.0.86` ARM64 wheel is tagged `macosx_13_0_arm64`. The supported and implemented boundary is therefore macOS 13+ on Apple Silicon, including the current macOS 26 MacBook; the planning artifacts were reconciled to avoid a false macOS 11/12 claim.

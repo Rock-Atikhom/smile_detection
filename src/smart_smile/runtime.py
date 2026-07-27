@@ -44,6 +44,27 @@ def _approved_versions() -> dict[str, str]:
     return approved
 
 
+def _approved_python_version() -> tuple[int, int, int]:
+    required_python = importlib.metadata.metadata("smart-smile").get("Requires-Python", "")
+    if not required_python.startswith("=="):
+        raise StartupError(
+            "DEPENDENCY_VERSION",
+            "Smart Smile project metadata does not pin an exact Python runtime",
+            "Restore the locked project environment.",
+            exit_code=5,
+        )
+    try:
+        major, minor, patch = required_python.removeprefix("==").split(".")
+        return int(major), int(minor), int(patch)
+    except ValueError as error:
+        raise StartupError(
+            "DEPENDENCY_VERSION",
+            f"Invalid Python runtime requirement: {required_python}",
+            "Restore the locked project environment.",
+            exit_code=5,
+        ) from error
+
+
 def _validate_platform() -> None:
     system = platform.system()
     machine = platform.machine().lower()
@@ -69,11 +90,13 @@ def _validate_platform() -> None:
 
 
 def validate_runtime() -> None:
-    if sys.version_info[:2] != (3, 12):
+    approved_python = _approved_python_version()
+    if sys.version_info[:3] != approved_python:
+        approved_text = ".".join(str(part) for part in approved_python)
         raise StartupError(
             "DEPENDENCY_VERSION",
-            "Smart Smile requires CPython 3.12",
-            "Run the application through the locked Python 3.12.10 environment.",
+            f"Smart Smile requires CPython {approved_text}",
+            f"Run the application through the locked Python {approved_text} environment.",
             exit_code=5,
         )
     _validate_platform()

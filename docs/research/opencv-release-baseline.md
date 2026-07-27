@@ -7,6 +7,10 @@ Research date: 2026-07-27
 Pin `opencv-contrib-python==4.11.0.86` alongside CPython 3.12 and
 `numpy==1.26.4`. Install no other OpenCV wheel family in the same environment.
 
+The exact ARM64 macOS wheel is tagged `macosx_13_0_arm64`. Although the selected
+MediaPipe wheel supports macOS 11+, the combined managed environment therefore
+supports macOS 13+ on Apple Silicon.
+
 This is not a preference for an older API. It is the newest published
 `opencv-contrib-python` release in the examined sequence whose official package
 metadata remains compatible with the project's deliberately conservative NumPy

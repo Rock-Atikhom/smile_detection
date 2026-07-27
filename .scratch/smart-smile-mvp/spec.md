@@ -84,7 +84,7 @@ Normal mode provides friendly, minimal guidance. Debug mode exposes operational 
 ## Implementation Decisions
 
 - The MVP is a managed-environment, desktop Python application. It is local, silent, single-Participant, CPU-only, and has no cloud or networking dependency.
-- Supported operating systems are Windows 10/11 on x86-64 and macOS 11 or later on Apple Silicon. Intel macOS is not part of the current support promise because the selected MediaPipe release has no matching wheel.
+- Supported operating systems are Windows 10/11 on x86-64 and macOS 13 or later on Apple Silicon. The combined floor is set by the selected OpenCV 4.11 ARM64 wheel; Intel macOS is not part of the current support promise because the selected MediaPipe release has no matching wheel.
 - The Windows performance baseline is an eighth-generation Intel Core i5, 8 GB RAM, CPU-only execution, and a standard 720p webcam.
 - The direct runtime baseline is 64-bit CPython 3.12.10, MediaPipe 0.10.35, OpenCV contrib 4.11.0.86, and NumPy 1.26.4. No second OpenCV wheel family may be installed.
 - Transitive dependencies will be resolved into separate, hash-locked environments for Windows x86-64 and macOS ARM64.
