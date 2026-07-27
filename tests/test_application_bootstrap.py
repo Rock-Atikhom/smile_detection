@@ -28,6 +28,30 @@ class InterruptingShell:
         raise KeyboardInterrupt
 
 
+class ClosedCapture:
+    def isOpened(self) -> bool:
+        return False
+
+    def set(self, _property_id: int, _value: float) -> bool:
+        return False
+
+    def get(self, _property_id: int) -> float:
+        return 0.0
+
+    def getBackendName(self) -> str:
+        return "NONE"
+
+    def read(self) -> tuple[bool, object | None]:
+        return False, None
+
+    def release(self) -> None:
+        pass
+
+
+def closed_capture(_index: int, _backend: int) -> ClosedCapture:
+    return ClosedCapture()
+
+
 def write_valid_config(root: Path) -> Path:
     config = root / "config.toml"
     config.write_text(
@@ -428,7 +452,10 @@ def test_application_shell_exits_for_standard_keys(
     monkeypatch.setattr(cv2, "waitKey", lambda _delay: exit_key)
     monkeypatch.setattr(cv2, "destroyWindow", lambda _name: None)
 
-    exit_code = run_application(["--config", str(config)], shell=OpenCvShell())
+    exit_code = run_application(
+        ["--config", str(config)],
+        shell=OpenCvShell(capture_factory=closed_capture),
+    )
 
     assert exit_code == 0
 
