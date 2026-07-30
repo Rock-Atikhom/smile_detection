@@ -384,16 +384,18 @@ describe("camera session lifecycle", () => {
   });
 
   it("validates a switch candidate before replacing the active stream and increments once", async () => {
-    const events: string[] = [];
     const firstTrack = makeTrack({ facingModes: ["user", "environment"] });
     const secondTrack = makeTrack({ facingMode: "environment" });
-    firstTrack.stop.mockImplementation(() => events.push("old-stopped"));
+    let resolveCandidate!: (value: { height: number; width: number }) => void;
     let attachment = 0;
-    const { session } = createHarness({
-      attachAndPlay: async () => {
+    const { attachAndPlay, session } = createHarness({
+      attachAndPlay: () => {
         attachment += 1;
-        if (attachment === 2) events.push("candidate-attached");
-        return { height: 720, width: 1280 };
+        if (attachment === 1)
+          return Promise.resolve({ height: 720, width: 1280 });
+        return new Promise((resolve) => {
+          resolveCandidate = resolve;
+        });
       },
       getUserMedia: vi
         .fn()
@@ -401,10 +403,14 @@ describe("camera session lifecycle", () => {
         .mockResolvedValueOnce(makeStream(secondTrack)),
     });
     await session.start();
-    await session.switchCamera();
+    const switching = session.switchCamera();
+    await vi.waitFor(() => expect(attachAndPlay).toHaveBeenCalledTimes(2));
+
+    expect(firstTrack.stop).not.toHaveBeenCalled();
+    resolveCandidate({ height: 720, width: 1280 });
+    await switching;
 
     expect(firstTrack.stop).toHaveBeenCalledOnce();
-    expect(events).toEqual(["candidate-attached", "old-stopped"]);
     expect(session.snapshot).toMatchObject({
       facingMode: "environment",
       generation: 2,

@@ -310,14 +310,11 @@ for (const viewport of viewports) {
   });
 }
 
-test("keeps camera actions reachable at 200 percent zoom with reflow", async ({
+test("keeps camera actions reachable at the 720 by 450 CSS viewport produced by 200 percent zoom", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 720, height: 450 });
   await page.goto("/");
-  await page.evaluate(() => {
-    document.documentElement.style.zoom = "2";
-  });
   await page.getByRole("button", { name: "Continue to camera" }).click();
 
   for (const name of ["Stop camera", "Help & system status"]) {

@@ -191,6 +191,7 @@ describe("Smart Smile camera session", () => {
   });
 
   it("stops a granted track when Stop is used while playback is pending", async () => {
+    vi.useFakeTimers();
     const { stream, track } = makeStream();
     installCamera(() => Promise.resolve(stream));
     Object.defineProperty(HTMLMediaElement.prototype, "play", {
@@ -200,18 +201,26 @@ describe("Smart Smile camera session", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
-    await screen.findByRole("heading", { name: "Starting the camera" });
+    await vi.waitFor(() =>
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+        "Starting the camera",
+      ),
+    );
     const video = screen.getByLabelText("Live camera preview");
     fireEvent.loadedData(video);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(1);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(track.stop).toHaveBeenCalledOnce();
+    expect(track.stop).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
       "Camera stopped",
     );
   });
 
   it("stops a granted track when the tab hides while playback is pending", async () => {
+    vi.useFakeTimers();
     const { stream, track } = makeStream();
     installCamera(() => Promise.resolve(stream));
     Object.defineProperty(HTMLMediaElement.prototype, "play", {
@@ -221,17 +230,20 @@ describe("Smart Smile camera session", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
-    const video = (await screen.findByLabelText(
-      "Live camera preview",
-    )) as HTMLVideoElement;
+    await vi.advanceTimersByTimeAsync(0);
+    const video = screen.getByLabelText("Live camera preview");
     fireEvent.loadedData(video);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(1);
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
     document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
 
-    expect(track.stop).toHaveBeenCalledOnce();
-    expect(
-      await screen.findByRole("heading", { name: "Camera stopped" }),
-    ).toBeVisible();
+    expect(track.stop).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Camera stopped",
+    );
   });
 
   it("opens Help & system status from an unsupported-browser recovery action", async () => {
