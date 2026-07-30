@@ -421,7 +421,8 @@ test("shows Switch camera only after permitted video inputs reveal a choice", as
   const box = await switchCamera.boundingBox();
   expect(box?.height).toBeGreaterThanOrEqual(48);
   expect(box?.width).toBeGreaterThanOrEqual(48);
-  await switchCamera.focus();
+  await page.getByRole("button", { name: "Stop camera" }).focus();
+  await page.keyboard.press("Tab");
   await expect(switchCamera).toBeFocused();
 });
 
