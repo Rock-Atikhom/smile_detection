@@ -5,6 +5,22 @@ const headers = readFileSync(
   new URL("../public/_headers", import.meta.url),
   "utf8",
 );
+const rootPackage = readFileSync(
+  new URL("../../../package.json", import.meta.url),
+  "utf8",
+);
+const contractsPackage = readFileSync(
+  new URL("../../../packages/contracts/package.json", import.meta.url),
+  "utf8",
+);
+
+test("keeps the empty shared-contracts workspace boundary", () => {
+  expect(rootPackage).toContain('"packages/*"');
+  expect(contractsPackage).toContain('"name": "@smart-smile/contracts"');
+  expect(contractsPackage).toContain('"private": true');
+  expect(contractsPackage).not.toContain('"dependencies"');
+  expect(contractsPackage).not.toContain('"scripts"');
+});
 
 test("keeps the required restrictive Cloudflare Pages security headers", () => {
   expect(headers).toContain("default-src 'self'");

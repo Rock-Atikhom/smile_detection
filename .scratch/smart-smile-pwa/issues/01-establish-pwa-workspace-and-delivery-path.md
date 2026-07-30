@@ -3,6 +3,8 @@ Execution: agent-led, with human preview review
 
 # 01 — Establish the PWA workspace and delivery path
 
+Status: in-progress — external Cloudflare preview evidence pending
+
 ## Outcome
 
 A responsive Smart Smile shell runs through one command in local development, one command as a locally served production build, GitHub CI, and a Cloudflare Pages preview, while the existing Python app remains runnable as a reference.
@@ -15,16 +17,16 @@ A responsive Smart Smile shell runs through one command in local development, on
 
 ## Acceptance criteria
 
-- [ ] Create the approved apps/web, apps/desktop-reference, packages/contracts, and docs topology.
-- [ ] Move the existing Python application and its assets without changing behavior; preserve its tests and documented run command.
-- [ ] Scaffold React, TypeScript, Vite, Tailwind, Radix primitives, Vitest, and Playwright with pinned dependencies and one lockfile strategy.
-- [ ] Render an accessible Smart Smile shell at phone, tablet, and desktop widths.
-- [ ] Provide local development, production build, and local production-preview commands.
-- [ ] CI runs formatting, lint, type checks, unit tests, component smoke tests, and production build.
+- [x] Create the approved apps/web, apps/desktop-reference, packages/contracts, and docs topology.
+- [x] Move the existing Python application and its assets without changing behavior; preserve its tests and documented run command.
+- [x] Scaffold React, TypeScript, Vite, Tailwind, Radix primitives, Vitest, and Playwright with pinned dependencies and one lockfile strategy.
+- [x] Render an accessible Smart Smile shell at phone, tablet, and desktop widths.
+- [x] Provide local development, production build, and local production-preview commands.
+- [x] CI runs formatting, lint, type checks, unit tests, component smoke tests, and production build.
 - [ ] Cloudflare Pages build settings publish the Vite output and create a pull-request preview.
 - [ ] Preview response headers include the initial restrictive security and Permissions Policy baseline.
-- [ ] README defines Web, Local, Mobile, and the current non-native MVP boundary.
-- [ ] No feature from paused desktop tickets 03–14 is accidentally implemented or deleted.
+- [x] README defines Web, Local, Mobile, and the current non-native MVP boundary.
+- [x] No feature from paused desktop tickets 03–14 is accidentally implemented or deleted.
 
 ## Verification
 
@@ -77,3 +79,33 @@ Camera permission, MediaPipe, offline model caching, or photo capture.
 - Verify the four responsive Playwright artifacts, built _headers, exact dependency pins, production bundle, and the absence of ticket-02 camera, MediaPipe, service-worker, photo, persistence, and analytics behavior.
 - Check whether a Cloudflare credential/project is available without exposing secret values. If unavailable, record the external preview as the only human-owned acceptance item and do not falsely mark it complete.
 - Update the ticket checklist and completion evidence. Mark the ticket completed only if every acceptance criterion, including an actual Cloudflare preview, has evidence; otherwise mark it in-progress with the exact remaining human action.
+
+## Completion evidence
+
+Verified locally on 2026-07-30 from the repository root with Node 22.22.2 and the committed
+lockfiles:
+
+- `npm ci` completed with zero reported vulnerabilities; formatting, ESLint, TypeScript,
+  two Vitest component tests, and the production build passed.
+- Playwright passed its delivery-policy checks and the built-shell checks at 390 by 844,
+  844 by 390, 768 by 1024, and 1440 by 900. Each viewport produced a correctly sized
+  screenshot artifact, the camera action stayed disabled, no video existed, and no page
+  overflow was detected.
+- `apps/web/dist/_headers` is byte-identical to `apps/web/public/_headers`. The policy includes
+  the documented CSP HTTPS upgrade and restrictive Cloudflare Pages headers.
+- The production bundle is 230.93 kB JavaScript and 8.37 kB CSS before gzip. Source inspection,
+  browser checks, and the component guard found no camera acquisition, MediaPipe, service
+  worker, capture, persistence, or analytics behavior. The runtime made only the three expected
+  same-origin shell requests and left browser storage empty.
+- All required npm dependency versions are exact in the web manifest and resolve to those
+  versions through the root lockfile. The empty `packages/contracts` boundary is protected by
+  a delivery test and contains no scripts, dependencies, or runtime implementation.
+- `make python-sync`, the 38 Python tests, Ruff formatting and lint checks, and strict mypy all
+  passed for the preserved desktop reference.
+- No Cloudflare credential indicator, project configuration, verified deployment hostname, or
+  preview-response evidence was available in this environment. No URL has been guessed.
+
+Remaining human-owned action: the repository owner must connect the private GitHub repository
+to a Cloudflare Pages project using `docs/deployment/cloudflare-pages.md`, create a pull-request
+preview, record its real URL, and verify its live response headers. Only then may the two open
+Cloudflare acceptance criteria be checked and this ticket marked completed.
