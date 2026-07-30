@@ -1,9 +1,7 @@
-Status: ready-for-agent
+Status: in-progress — external Cloudflare preview evidence pending
 Execution: agent-led, with human preview review
 
 # 01 — Establish the PWA workspace and delivery path
-
-Status: in-progress — external Cloudflare preview evidence pending
 
 ## Outcome
 
@@ -34,10 +32,6 @@ A responsive Smart Smile shell runs through one command in local development, on
 - Responsive shell screenshots at 390 by 844, 844 by 390, 768 by 1024, and 1440 by 900.
 - Python test suite plus new web quality gates.
 - Preview URL and response-header evidence.
-
-## Blocked by
-
-Planning pack approval.
 
 ## Not included
 
