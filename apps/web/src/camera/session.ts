@@ -202,10 +202,7 @@ export class CameraSession {
       stopTracks(oldStream);
       this.activeStream = undefined;
       this.activeTrack = undefined;
-      this.setSnapshot({
-        reason: mapCameraError(error),
-        state: "recoverable-error",
-      });
+      this.setError(error);
     } finally {
       if (this.attemptAbort === restoreAbort) this.attemptAbort = undefined;
     }
@@ -284,7 +281,7 @@ export class CameraSession {
     this.setSnapshot({
       permission: "granted",
       reason: undefined,
-      state: "camera-starting",
+      state: isSwitch ? "camera-switching" : "camera-starting",
     });
     try {
       const decoded = await this.deps.attachAndPlay(stream, abort.signal);

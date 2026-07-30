@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CAMERA_PERMISSION_TIMEOUT_MS,
+  CAMERA_WARMUP_MS,
   CameraSession,
   createInitialCameraSnapshot,
   mapCameraError,
@@ -53,6 +54,7 @@ function createHarness(
       stream: MediaStream,
       signal: AbortSignal,
     ) => Promise<{ height: number; width: number }>;
+    restore?: (stream: MediaStream, signal: AbortSignal) => Promise<void>;
     mobile?: boolean;
   } = {},
 ) {
@@ -72,6 +74,7 @@ function createHarness(
     getUserMedia,
     isMobile: () => options.mobile ?? false,
     isSecureContext: () => true,
+    restore: options.restore,
   });
   return { attachAndPlay, enumerateDevices, getUserMedia, session };
 }
@@ -236,6 +239,7 @@ describe("camera session lifecycle", () => {
   });
 
   it("invalidates the public generation immediately when an active track ends", async () => {
+    vi.useFakeTimers();
     const firstTrack = makeTrack();
     const secondTrack = makeTrack();
     const { session } = createHarness({
@@ -248,6 +252,12 @@ describe("camera session lifecycle", () => {
     expect(session.snapshot.generation).toBe(1);
 
     firstTrack.dispatchEvent(new Event("ended"));
+    expect(session.snapshot).toMatchObject({
+      generation: 2,
+      reason: "interruption",
+      state: "recoverable-error",
+    });
+    await vi.advanceTimersByTimeAsync(CAMERA_WARMUP_MS);
     expect(session.snapshot).toMatchObject({
       generation: 2,
       reason: "interruption",
@@ -374,9 +384,17 @@ describe("camera session lifecycle", () => {
   });
 
   it("validates a switch candidate before replacing the active stream and increments once", async () => {
+    const events: string[] = [];
     const firstTrack = makeTrack({ facingModes: ["user", "environment"] });
     const secondTrack = makeTrack({ facingMode: "environment" });
+    firstTrack.stop.mockImplementation(() => events.push("old-stopped"));
+    let attachment = 0;
     const { session } = createHarness({
+      attachAndPlay: async () => {
+        attachment += 1;
+        if (attachment === 2) events.push("candidate-attached");
+        return { height: 720, width: 1280 };
+      },
       getUserMedia: vi
         .fn()
         .mockResolvedValueOnce(makeStream(firstTrack))
@@ -386,6 +404,7 @@ describe("camera session lifecycle", () => {
     await session.switchCamera();
 
     expect(firstTrack.stop).toHaveBeenCalledOnce();
+    expect(events).toEqual(["candidate-attached", "old-stopped"]);
     expect(session.snapshot).toMatchObject({
       facingMode: "environment",
       generation: 2,
@@ -412,11 +431,16 @@ describe("camera session lifecycle", () => {
   });
 
   it("keeps the delivered rear-camera device choice across visibility recovery", async () => {
+    const frontTrack = makeTrack({ deviceId: "front", facingMode: "user" });
     const rearTrack = makeTrack({
       deviceId: "rear",
       facingMode: "environment",
     });
     const recoveredRearTrack = makeTrack({
+      deviceId: "rear",
+      facingMode: "environment",
+    });
+    const reconstructedRearTrack = makeTrack({
       deviceId: "rear",
       facingMode: "environment",
     });
@@ -428,19 +452,52 @@ describe("camera session lifecycle", () => {
         ] as MediaDeviceInfo[]),
       getUserMedia: vi
         .fn()
+        .mockResolvedValueOnce(makeStream(frontTrack))
         .mockResolvedValueOnce(makeStream(rearTrack))
-        .mockResolvedValueOnce(makeStream(recoveredRearTrack)),
+        .mockResolvedValueOnce(makeStream(recoveredRearTrack))
+        .mockResolvedValueOnce(makeStream(reconstructedRearTrack)),
     });
     await session.start();
     await Promise.resolve();
+    await session.switchCamera();
     session.setVisibility(false);
     await session.setVisibility(true);
 
-    expect(getUserMedia).toHaveBeenLastCalledWith(
+    expect(getUserMedia.mock.calls[2]?.[0]).toEqual(
       expect.objectContaining({
         video: expect.objectContaining({ deviceId: { exact: "rear" } }),
       }),
     );
+    await session.reconstructForOrientation();
+    expect(getUserMedia.mock.calls[3]?.[0]).toEqual(
+      expect.objectContaining({
+        video: expect.objectContaining({ deviceId: { exact: "rear" } }),
+      }),
+    );
+    expect(session.snapshot).toMatchObject({
+      facingMode: "environment",
+      generation: 4,
+      state: "warm-up",
+    });
+  });
+
+  it("maps retained-stream playback restoration failure without revoking camera permission", async () => {
+    const firstTrack = makeTrack({ facingModes: ["user", "environment"] });
+    const { session } = createHarness({
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(firstTrack))
+        .mockRejectedValueOnce({ name: "NotReadableError" }),
+      restore: () => Promise.reject({ name: "PlaybackError" }),
+    });
+    await session.start();
+    await session.switchCamera();
+
+    expect(session.snapshot).toMatchObject({
+      permission: "granted",
+      reason: "playback-unavailable",
+      state: "recoverable-error",
+    });
   });
 
   it("reconstructs after orientation changes with one new generation", async () => {

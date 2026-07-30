@@ -23,38 +23,13 @@ async function attachAndPlay(
 ) {
   if (!video) throw { name: "InvalidStateError" };
   video.srcObject = stream;
-  await new Promise<void>((resolve, reject) => {
-    const finish = () => {
-      clearTimeout(timeout);
-      signal.removeEventListener("abort", onAbort);
-      video.removeEventListener("loadeddata", onFrame);
-    };
-    const onAbort = () => {
-      finish();
-      reject({ name: "AbortError" });
-    };
-    const onFrame = () => {
-      finish();
-      resolve();
-    };
-    const timeout = setTimeout(() => {
-      finish();
-      reject({ name: "AbortError" });
-    }, CAMERA_ATTACHMENT_TIMEOUT_MS);
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-      onFrame();
-      return;
-    }
-    video.addEventListener("loadeddata", onFrame, { once: true });
-  });
-  if (signal.aborted) throw { name: "AbortError" };
   try {
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       const finish = () => {
         clearTimeout(timeout);
         signal.removeEventListener("abort", onAbort);
+        video.removeEventListener("loadeddata", onFrame);
       };
       const settle = (callback: () => void) => {
         if (settled) return;
@@ -63,15 +38,24 @@ async function attachAndPlay(
         callback();
       };
       const onAbort = () => settle(() => reject({ name: "AbortError" }));
+      const onFrame = () => {
+        video.removeEventListener("loadeddata", onFrame);
+        try {
+          void video.play().then(
+            () => settle(resolve),
+            (error) => settle(() => reject(error)),
+          );
+        } catch (error) {
+          settle(() => reject(error));
+        }
+      };
       const timeout = setTimeout(
         () => settle(() => reject({ name: "AbortError" })),
         CAMERA_ATTACHMENT_TIMEOUT_MS,
       );
       signal.addEventListener("abort", onAbort, { once: true });
-      void video.play().then(
-        () => settle(resolve),
-        (error) => settle(() => reject(error)),
-      );
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) onFrame();
+      else video.addEventListener("loadeddata", onFrame, { once: true });
     });
   } catch (error) {
     if (signal.aborted) throw { name: "AbortError" };

@@ -10,7 +10,7 @@ const viewports = [
 for (const viewport of viewports) {
   test(`preserves the Ticket 01 privacy foundation at ${viewport.name}`, async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.goto("/");
     await expect(page.getByRole("banner")).toBeVisible();
@@ -40,6 +40,30 @@ for (const viewport of viewports) {
         ),
       )
       .toBe(true);
+
+    if (viewport.name === "landscape-844x390") {
+      const cameraStage = page.getByLabel("Camera preview");
+      const footer = page.getByRole("contentinfo");
+      const continueAction = page.getByRole("button", {
+        name: "Continue to camera",
+      });
+      const helpAction = page.getByRole("button", {
+        name: "Help & system status",
+      });
+      for (const control of [continueAction, helpAction]) {
+        await control.scrollIntoViewIfNeeded();
+        await expect(control).toBeInViewport();
+        await expect(cameraStage).toBeInViewport();
+        await expect(footer).toBeInViewport();
+      }
+    }
+
+    const screenshot = testInfo.outputPath(`${viewport.name}.png`);
+    await page.screenshot({ path: screenshot });
+    await testInfo.attach(`${viewport.name}-screenshot`, {
+      path: screenshot,
+      contentType: "image/png",
+    });
   });
 }
 
@@ -257,10 +281,23 @@ for (const viewport of viewports) {
       page.getByRole("button", { name: "Help & system status" }),
     ).toBeVisible();
     for (const name of ["Stop camera", "Help & system status"]) {
-      const box = await page.getByRole("button", { name }).boundingBox();
+      const control = page.getByRole("button", { name });
+      await control.scrollIntoViewIfNeeded();
+      await expect(control).toBeInViewport();
+      const box = await control.boundingBox();
       expect(box?.height).toBeGreaterThanOrEqual(48);
       expect(box?.width).toBeGreaterThanOrEqual(48);
     }
+    const keyboardTargets = new Set(["Stop camera", "Help & system status"]);
+    await page.getByRole("link", { name: "Smart Smile home" }).focus();
+    for (let step = 0; step < 8 && keyboardTargets.size > 0; step += 1) {
+      await page.keyboard.press("Tab");
+      const focusedText = await page.evaluate(
+        () => document.activeElement?.textContent?.trim() ?? "",
+      );
+      keyboardTargets.delete(focusedText);
+    }
+    expect([...keyboardTargets]).toEqual([]);
     await expect
       .poll(() =>
         page.evaluate(
@@ -272,6 +309,34 @@ for (const viewport of viewports) {
       .toBe(true);
   });
 }
+
+test("keeps camera actions reachable at 200 percent zoom with reflow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "2";
+  });
+  await page.getByRole("button", { name: "Continue to camera" }).click();
+
+  for (const name of ["Stop camera", "Help & system status"]) {
+    const control = page.getByRole("button", { name });
+    await control.scrollIntoViewIfNeeded();
+    await expect(control).toBeInViewport();
+    await control.focus();
+    await expect(control).toBeFocused();
+  }
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+    )
+    .toBe(true);
+});
 
 test("shows Switch camera only after permitted video inputs reveal a choice", async ({
   page,

@@ -290,6 +290,7 @@ export default function App() {
     useCameraSession();
   const copy = coachCopy(snapshot);
   const [helpRequest, setHelpRequest] = useState(false);
+  const primaryActionRef = useRef<HTMLButtonElement>(null);
   const recoveryHeadingRef = useRef<HTMLHeadingElement>(null);
   const active =
     snapshot.state === "permission-pending" ||
@@ -300,22 +301,24 @@ export default function App() {
     snapshot.reason === "switch-failed";
   const recovery = snapshot.state === "recoverable-error";
   const liveStatus =
-    snapshot.state === "permission-pending"
-      ? "Camera permission requested."
-      : snapshot.state === "camera-starting"
-        ? "Camera starting."
-        : snapshot.state === "camera-switching"
-          ? "Switching camera."
-          : snapshot.state === "warm-up"
-            ? "Hold the device steady while the camera settles."
-            : snapshot.state === "ready"
-              ? "Camera ready."
-              : recovery
-                ? `Camera status: ${copy.heading}.`
-                : "";
+    snapshot.reason === "switch-failed"
+      ? `Camera status: ${copy.heading}.`
+      : snapshot.state === "permission-pending"
+        ? "Camera permission requested."
+        : snapshot.state === "camera-starting"
+          ? "Camera starting."
+          : snapshot.state === "camera-switching"
+            ? "Switching camera."
+            : snapshot.state === "warm-up"
+              ? "Hold the device steady while the camera settles."
+              : snapshot.state === "ready"
+                ? "Camera ready."
+                : recovery
+                  ? `Camera status: ${copy.heading}.`
+                  : "";
   useLayoutEffect(() => {
-    if (recovery && snapshot.reason !== "switch-failed")
-      recoveryHeadingRef.current?.focus();
+    if (snapshot.reason === "switch-failed") primaryActionRef.current?.focus();
+    else if (recovery) recoveryHeadingRef.current?.focus();
   }, [recovery, snapshot.reason]);
   const runAction = () => {
     if (snapshot.reason === "switch-failed") switchCamera();
@@ -383,6 +386,7 @@ export default function App() {
           <p>{copy.text}</p>
           <p
             aria-label="Camera status"
+            aria-atomic="true"
             aria-live="polite"
             className="camera-status"
             id="camera-status"
@@ -394,6 +398,7 @@ export default function App() {
               className="primary-action"
               type="button"
               onClick={runAction}
+              ref={primaryActionRef}
             >
               {copy.action}
             </button>
