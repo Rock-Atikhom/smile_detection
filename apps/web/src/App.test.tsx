@@ -39,7 +39,10 @@ describe("Smart Smile foundation shell", () => {
       screen.getByText("Camera setup is the next delivery step."),
     ).toBeVisible();
 
-    continueButton.click();
+    const privacyTrigger = screen.getByRole("button", { name: "How privacy works" });
+    expect(privacyTrigger).toBeEnabled();
+    fireEvent.click(privacyTrigger);
+    expect(screen.getByRole("dialog", { name: "How privacy works" })).toBeVisible();
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 

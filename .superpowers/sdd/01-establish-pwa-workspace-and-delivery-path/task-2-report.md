@@ -121,3 +121,47 @@ vite v8.1.5 building client environment for production...
 - Confirmed `git diff --check` is clean.
 - Confirmed no generated starter assets are tracked and `node_modules/` is ignored.
 - Kept changes separate from the desktop reference; its complete test suite remains green.
+
+## Fix Round 1
+
+### Changed files
+
+- `apps/web/src/App.test.tsx`: replaced the ineffective click on the disabled continuation button with the enabled “How privacy works” participant interaction. The test now confirms the disclosure opens and `getUserMedia` remains uncalled.
+- `apps/web/src/styles.css`: made the focusable Smart Smile wordmark an inline-flex target with 48 px minimum width and height.
+- `package.json`: narrowed the application workspace from `apps/*` to `apps/web` while retaining `packages/*`.
+- `package-lock.json`: regenerated lockfile workspace metadata.
+
+### Commands and output
+
+```bash
+npm install --package-lock-only
+```
+
+```text
+up to date, audited 196 packages in 1s
+found 0 vulnerabilities
+```
+
+```bash
+npm run test --workspace=@smart-smile/web -- src/App.test.tsx
+```
+
+```text
+Test Files  1 passed (1)
+Tests  2 passed (2)
+```
+
+```bash
+npm run web:test && npm run web:typecheck && npm run web:build
+```
+
+```text
+Test Files  1 passed (1)
+Tests  2 passed (2)
+
+tsc -b --pretty false
+
+vite v8.1.5 building client environment for production...
+✓ 70 modules transformed.
+✓ built in 46ms
+```

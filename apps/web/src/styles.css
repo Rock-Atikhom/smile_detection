@@ -65,6 +65,10 @@ a:focus-visible {
 }
 
 .wordmark {
+  display: inline-flex;
+  align-items: center;
+  min-width: 48px;
+  min-height: 48px;
   color: var(--text-strong);
   font-size: 1.125rem;
   font-weight: 750;
