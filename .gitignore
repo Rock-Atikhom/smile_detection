@@ -11,3 +11,4 @@ dist/
 output/
 logs/
 *.log
+.worktrees/
