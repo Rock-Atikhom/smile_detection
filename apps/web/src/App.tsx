@@ -1,5 +1,11 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { CameraRecoveryReason, CameraSnapshot } from "./camera/session";
 import { useCameraSession } from "./camera/useCameraSession";
 
@@ -50,6 +56,11 @@ const errorCopy: Record<CameraRecoveryReason, Copy> = {
     action: "Try again",
     heading: "This camera needs a different setup",
     text: "Try again to let the browser choose a compatible camera setting.",
+  },
+  "playback-unavailable": {
+    action: "Try again",
+    heading: "Camera preview could not start",
+    text: "Your camera is available. Try again to start the preview.",
   },
   "switch-failed": {
     action: "Switch camera",
@@ -243,6 +254,13 @@ function coachCopy(snapshot: CameraSnapshot): Copy {
       text: "This may take a moment.",
     };
   }
+  if (snapshot.state === "camera-switching") {
+    return {
+      action: "Stop camera",
+      heading: "Switching camera",
+      text: "Starting your other camera.",
+    };
+  }
   if (snapshot.state === "warm-up") {
     return {
       action: "Stop camera",
@@ -272,13 +290,33 @@ export default function App() {
     useCameraSession();
   const copy = coachCopy(snapshot);
   const [helpRequest, setHelpRequest] = useState(false);
+  const recoveryHeadingRef = useRef<HTMLHeadingElement>(null);
   const active =
     snapshot.state === "permission-pending" ||
     snapshot.state === "camera-starting" ||
+    snapshot.state === "camera-switching" ||
     snapshot.state === "warm-up" ||
     snapshot.state === "ready" ||
-    snapshot.state === "recoverable-error";
+    snapshot.reason === "switch-failed";
   const recovery = snapshot.state === "recoverable-error";
+  const liveStatus =
+    snapshot.state === "permission-pending"
+      ? "Camera permission requested."
+      : snapshot.state === "camera-starting"
+        ? "Camera starting."
+        : snapshot.state === "camera-switching"
+          ? "Switching camera."
+          : snapshot.state === "warm-up"
+            ? "Hold the device steady while the camera settles."
+            : snapshot.state === "ready"
+              ? "Camera ready."
+              : recovery
+                ? `Camera status: ${copy.heading}.`
+                : "";
+  useLayoutEffect(() => {
+    if (recovery && snapshot.reason !== "switch-failed")
+      recoveryHeadingRef.current?.focus();
+  }, [recovery, snapshot.reason]);
   const runAction = () => {
     if (snapshot.reason === "switch-failed") switchCamera();
     else if (
@@ -288,6 +326,7 @@ export default function App() {
       start();
     else if (
       snapshot.state === "camera-starting" ||
+      snapshot.state === "camera-switching" ||
       snapshot.state === "warm-up" ||
       snapshot.state === "ready"
     )
@@ -338,7 +377,9 @@ export default function App() {
         </section>
         <section className="coach-card" aria-labelledby="camera-heading">
           <p className="eyebrow">Private by design</p>
-          <h1 id="camera-heading">{copy.heading}</h1>
+          <h1 id="camera-heading" ref={recoveryHeadingRef} tabIndex={-1}>
+            {copy.heading}
+          </h1>
           <p>{copy.text}</p>
           <p
             aria-label="Camera status"
@@ -346,11 +387,7 @@ export default function App() {
             className="camera-status"
             id="camera-status"
           >
-            {snapshot.state === "warm-up"
-              ? "Hold the device steady while the camera settles."
-              : snapshot.state === "ready"
-                ? "Camera ready."
-                : ""}
+            {liveStatus}
           </p>
           {copy.action && (
             <button

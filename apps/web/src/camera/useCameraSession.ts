@@ -49,7 +49,34 @@ async function attachAndPlay(
     video.addEventListener("loadeddata", onFrame, { once: true });
   });
   if (signal.aborted) throw { name: "AbortError" };
-  await video.play();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = () => {
+        clearTimeout(timeout);
+        signal.removeEventListener("abort", onAbort);
+      };
+      const settle = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        finish();
+        callback();
+      };
+      const onAbort = () => settle(() => reject({ name: "AbortError" }));
+      const timeout = setTimeout(
+        () => settle(() => reject({ name: "AbortError" })),
+        CAMERA_ATTACHMENT_TIMEOUT_MS,
+      );
+      signal.addEventListener("abort", onAbort, { once: true });
+      void video.play().then(
+        () => settle(resolve),
+        (error) => settle(() => reject(error)),
+      );
+    });
+  } catch (error) {
+    if (signal.aborted) throw { name: "AbortError" };
+    throw { name: "PlaybackError", cause: error };
+  }
   if (signal.aborted) throw { name: "AbortError" };
   return { height: video.videoHeight, width: video.videoWidth };
 }

@@ -7,6 +7,7 @@ export type CameraState =
   | "privacy-introduction"
   | "permission-pending"
   | "camera-starting"
+  | "camera-switching"
   | "warm-up"
   | "ready"
   | "stopped"
@@ -22,7 +23,8 @@ export type CameraRecoveryReason =
   | "ignored-prompt"
   | "interruption"
   | "unsupported-camera-api"
-  | "switch-failed";
+  | "switch-failed"
+  | "playback-unavailable";
 export type CameraPermission = "unknown" | "prompt" | "granted" | "denied";
 export type CameraSnapshot = {
   canSwitch: boolean;
@@ -107,7 +109,7 @@ function switchedConstraints(
     width: { ideal: 1280 },
   };
   if (deviceId) video.deviceId = { exact: deviceId };
-  else if (facingMode) video.facingMode = { ideal: facingMode };
+  else if (facingMode) video.facingMode = { exact: facingMode };
   return { audio: false, video };
 }
 
@@ -119,6 +121,8 @@ export class CameraSession {
   private candidateStream: MediaStream | undefined;
   private deviceIds: string[] = [];
   private deviceIndex = 0;
+  private lastDeviceId: string | undefined;
+  private lastFacingMode: string | undefined;
   private listeners = new Set<(snapshot: CameraSnapshot) => void>();
   private requestEpoch = 0;
   private snapshotValue = createInitialCameraSnapshot();
@@ -133,7 +137,7 @@ export class CameraSession {
     return () => this.listeners.delete(listener);
   }
 
-  async start() {
+  async start(preserveChoice = false) {
     if (!this.deps.isSecureContext()) {
       this.setSnapshot({
         permission: "unknown",
@@ -142,7 +146,13 @@ export class CameraSession {
       });
       return;
     }
-    await this.acquire(initialConstraints(this.deps.isMobile()), false);
+    const constraints =
+      preserveChoice && this.lastDeviceId
+        ? switchedConstraints(this.lastDeviceId, undefined)
+        : preserveChoice && this.lastFacingMode
+          ? switchedConstraints(undefined, this.lastFacingMode)
+          : initialConstraints(this.deps.isMobile());
+    await this.acquire(constraints, false);
   }
   async restart() {
     this.invalidateInFlightAndOwned();
@@ -155,15 +165,22 @@ export class CameraSession {
     const oldStream = this.activeStream;
     const oldTrack = this.activeTrack;
     const currentDeviceId = oldTrack?.getSettings().deviceId;
-    const nextIndex = this.deviceIds.findIndex(
-      (deviceId) => deviceId !== currentDeviceId,
-    );
+    const currentIndex = this.deviceIds.indexOf(currentDeviceId ?? "");
+    const nextIndex =
+      this.deviceIds.length > 1
+        ? (currentIndex >= 0 ? currentIndex + 1 : this.deviceIndex + 1) %
+          this.deviceIds.length
+        : -1;
     const nextDeviceId = nextIndex >= 0 ? this.deviceIds[nextIndex] : undefined;
     const alternateFacing =
       oldTrack?.getSettings().facingMode === "user" ? "environment" : "user";
     const { epoch, outcome } = await this.acquire(
       switchedConstraints(nextDeviceId, alternateFacing),
       true,
+      {
+        deviceId: nextDeviceId,
+        facingMode: nextDeviceId ? undefined : alternateFacing,
+      },
     );
     if (
       outcome !== "failed" ||
@@ -221,12 +238,12 @@ export class CameraSession {
     }
     if (!this.activeBeforeHide) return;
     this.activeBeforeHide = false;
-    return this.start();
+    return this.start(true);
   }
   async reconstructForOrientation() {
     if (!this.activeStream) return;
     this.invalidateInFlightAndOwned();
-    await this.start();
+    await this.start(true);
   }
   dispose() {
     this.activeBeforeHide = false;
@@ -237,6 +254,7 @@ export class CameraSession {
   private async acquire(
     constraints: MediaStreamConstraints,
     isSwitch: boolean,
+    expected?: { deviceId?: string; facingMode?: string },
   ): Promise<{ epoch: number; outcome: AttemptOutcome }> {
     const epoch = ++this.requestEpoch;
     const abort = new AbortController();
@@ -246,7 +264,7 @@ export class CameraSession {
     this.setSnapshot({
       permission: "prompt",
       reason: undefined,
-      state: isSwitch ? "camera-starting" : "permission-pending",
+      state: isSwitch ? "camera-switching" : "permission-pending",
     });
     let stream: MediaStream;
     try {
@@ -281,11 +299,20 @@ export class CameraSession {
       const track = stream.getVideoTracks()[0];
       if (!track) throw { name: "NotFoundError" };
       const settings = track.getSettings();
+      if (
+        expected &&
+        ((expected.deviceId && settings.deviceId !== expected.deviceId) ||
+          (expected.facingMode && settings.facingMode !== expected.facingMode))
+      ) {
+        throw { name: "SameCameraError" };
+      }
       const capabilities = track.getCapabilities?.();
       const priorStream = this.activeStream;
       this.candidateStream = undefined;
       this.activeStream = stream;
       this.activeTrack = track;
+      this.lastDeviceId = settings.deviceId;
+      this.lastFacingMode = settings.facingMode;
       track.addEventListener("ended", () => this.handleTrackEnded(stream));
       if (priorStream && priorStream !== stream) stopTracks(priorStream);
       this.snapshotValue = {
@@ -398,7 +425,13 @@ export class CameraSession {
   private handleTrackEnded(stream: MediaStream) {
     if (stream !== this.activeStream) return;
     this.invalidateInFlightAndOwned();
-    this.setSnapshot({ reason: "interruption", state: "recoverable-error" });
+    // A stopped track cannot produce a valid result, so invalidate the public
+    // generation before publishing the interruption state.
+    this.setSnapshot({
+      generation: this.snapshotValue.generation + 1,
+      reason: "interruption",
+      state: "recoverable-error",
+    });
   }
   private invalidateInFlightAndOwned() {
     this.requestEpoch += 1;
@@ -424,6 +457,18 @@ export class CameraSession {
     this.warmupTimer = undefined;
   }
   private setError(error: unknown) {
+    const name =
+      typeof error === "object" && error !== null && "name" in error
+        ? String(error.name)
+        : "";
+    if (name === "PlaybackError") {
+      this.setSnapshot({
+        permission: "granted",
+        reason: "playback-unavailable",
+        state: "recoverable-error",
+      });
+      return;
+    }
     const reason = mapCameraError(error);
     this.setSnapshot({
       permission:

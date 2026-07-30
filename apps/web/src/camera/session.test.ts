@@ -235,6 +235,28 @@ describe("camera session lifecycle", () => {
     });
   });
 
+  it("invalidates the public generation immediately when an active track ends", async () => {
+    const firstTrack = makeTrack();
+    const secondTrack = makeTrack();
+    const { session } = createHarness({
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(firstTrack))
+        .mockResolvedValueOnce(makeStream(secondTrack)),
+    });
+    await session.start();
+    expect(session.snapshot.generation).toBe(1);
+
+    firstTrack.dispatchEvent(new Event("ended"));
+    expect(session.snapshot).toMatchObject({
+      generation: 2,
+      reason: "interruption",
+      state: "recoverable-error",
+    });
+    await session.restart();
+    expect(session.snapshot).toMatchObject({ generation: 3, state: "warm-up" });
+  });
+
   it("retains the working stream when a switch candidate fails", async () => {
     const firstTrack = makeTrack({ facingModes: ["user", "environment"] });
     const firstStream = makeStream(firstTrack);
@@ -309,6 +331,48 @@ describe("camera session lifecycle", () => {
     );
   });
 
+  it("cycles through every enumerated camera and rejects a delivered duplicate", async () => {
+    const firstTrack = makeTrack({ deviceId: "A" });
+    const secondTrack = makeTrack({ deviceId: "B" });
+    const thirdTrack = makeTrack({ deviceId: "C" });
+    const returnedTrack = makeTrack({ deviceId: "A" });
+    const duplicateTrack = makeTrack({ deviceId: "A" });
+    const devices = ["A", "B", "C"].map(
+      (deviceId) => ({ deviceId, kind: "videoinput" }) as MediaDeviceInfo,
+    );
+    const { getUserMedia, session } = createHarness({
+      enumerateDevices: () => Promise.resolve(devices),
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(firstTrack))
+        .mockResolvedValueOnce(makeStream(secondTrack))
+        .mockResolvedValueOnce(makeStream(thirdTrack))
+        .mockResolvedValueOnce(makeStream(returnedTrack))
+        .mockResolvedValueOnce(makeStream(duplicateTrack)),
+    });
+    await session.start();
+    await Promise.resolve();
+    await session.switchCamera();
+    await session.switchCamera();
+    await session.switchCamera();
+    await session.switchCamera();
+
+    expect(
+      getUserMedia.mock.calls.slice(1).map(([constraints]) => {
+        const video = constraints.video as MediaTrackConstraints;
+        return (video.deviceId as ConstrainDOMStringParameters).exact;
+      }),
+    ).toEqual(["B", "C", "A", "B"]);
+    expect(secondTrack.stop).toHaveBeenCalledOnce();
+    expect(thirdTrack.stop).toHaveBeenCalledOnce();
+    expect(firstTrack.stop).toHaveBeenCalledOnce();
+    expect(returnedTrack.stop).not.toHaveBeenCalled();
+    expect(session.snapshot).toMatchObject({
+      reason: "switch-failed",
+      state: "warm-up",
+    });
+  });
+
   it("validates a switch candidate before replacing the active stream and increments once", async () => {
     const firstTrack = makeTrack({ facingModes: ["user", "environment"] });
     const secondTrack = makeTrack({ facingMode: "environment" });
@@ -345,6 +409,38 @@ describe("camera session lifecycle", () => {
     await session.setVisibility(true);
 
     expect(session.snapshot).toMatchObject({ generation: 2, state: "warm-up" });
+  });
+
+  it("keeps the delivered rear-camera device choice across visibility recovery", async () => {
+    const rearTrack = makeTrack({
+      deviceId: "rear",
+      facingMode: "environment",
+    });
+    const recoveredRearTrack = makeTrack({
+      deviceId: "rear",
+      facingMode: "environment",
+    });
+    const { getUserMedia, session } = createHarness({
+      enumerateDevices: () =>
+        Promise.resolve([
+          { deviceId: "front", kind: "videoinput" },
+          { deviceId: "rear", kind: "videoinput" },
+        ] as MediaDeviceInfo[]),
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(rearTrack))
+        .mockResolvedValueOnce(makeStream(recoveredRearTrack)),
+    });
+    await session.start();
+    await Promise.resolve();
+    session.setVisibility(false);
+    await session.setVisibility(true);
+
+    expect(getUserMedia).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        video: expect.objectContaining({ deviceId: { exact: "rear" } }),
+      }),
+    );
   });
 
   it("reconstructs after orientation changes with one new generation", async () => {

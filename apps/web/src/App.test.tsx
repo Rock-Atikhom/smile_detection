@@ -130,9 +130,9 @@ describe("Smart Smile camera session", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(
-      "Camera access is off",
-    );
+    expect(
+      await screen.findByRole("heading", { name: "Camera access is off" }),
+    ).toBeVisible();
     expect(
       screen.getByText(
         "Allow camera access in browser or device settings, then return here.",
@@ -140,6 +140,31 @@ describe("Smart Smile camera session", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
     expect(screen.queryByText("NotAllowedError")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveFocus();
+  });
+
+  it("maps a preview playback rejection to actionable recovery", async () => {
+    const { stream } = makeStream();
+    installCamera(() => Promise.resolve(stream));
+    Object.defineProperty(HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value: vi.fn(() => Promise.reject({ name: "NotAllowedError" })),
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+    await screen.findByRole("heading", { name: "Starting the camera" });
+    const video = screen.getByLabelText("Live camera preview");
+    fireEvent.loadedData(video);
+    expect(
+      await screen.findByRole("heading", {
+        name: "Camera preview could not start",
+      }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Camera status")).toHaveTextContent(
+      "Camera status: Camera preview could not start.",
+    );
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
   });
 
   it("opens Help & system status from an unsupported-browser recovery action", async () => {
