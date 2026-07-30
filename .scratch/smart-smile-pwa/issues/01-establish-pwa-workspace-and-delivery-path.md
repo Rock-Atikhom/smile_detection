@@ -1,4 +1,4 @@
-Status: in-progress — external Cloudflare preview evidence pending
+Status: completed
 Execution: agent-led, with human preview review
 
 # 01 — Establish the PWA workspace and delivery path
@@ -21,8 +21,8 @@ A responsive Smart Smile shell runs through one command in local development, on
 - [x] Render an accessible Smart Smile shell at phone, tablet, and desktop widths.
 - [x] Provide local development, production build, and local production-preview commands.
 - [x] CI runs formatting, lint, type checks, unit tests, component smoke tests, and production build.
-- [ ] Cloudflare Pages build settings publish the Vite output and create a pull-request preview.
-- [ ] Preview response headers include the initial restrictive security and Permissions Policy baseline.
+- [x] Cloudflare Pages build settings publish the Vite output and create a pull-request preview.
+- [x] Preview response headers include the initial restrictive security and Permissions Policy baseline.
 - [x] README defines Web, Local, Mobile, and the current non-native MVP boundary.
 - [x] No feature from paused desktop tickets 03–14 is accidentally implemented or deleted.
 
@@ -107,14 +107,16 @@ lockfiles:
 - GitHub Actions builds the web bundle once, tests that output, and passes it as an immutable
   short-lived artifact to a Cloudflare Direct Upload job that depends on both web and Python gates.
   Action references, Wrangler, Node, and npm are exact pins. The deployment remains intentionally
-  disabled until the owner provides the real project variables and credentials.
+  gated behind the repository variables and credentials; run `30523980882`, attempt 4, completed
+  the web, Python, and Cloudflare deployment jobs successfully.
 - Minimal tracked architecture, privacy, and validation indexes now anchor the approved docs
   topology without implementing later runtime lanes.
-- No Cloudflare credential indicator, project configuration, verified deployment hostname, or
-  preview-response evidence was available in this environment. No URL has been guessed.
-
-Remaining human-owned action: the repository owner must create a real Cloudflare Pages Direct
-Upload project, add the documented GitHub secrets and project variables, enable the deployment
-job, and open or update a pull request. Record the URL emitted by that successful gated preview
-and verify its live response headers. Only then may the two open Cloudflare acceptance criteria
-be checked and this ticket marked completed.
+- The gated preview deployed project `smart-smile-rock-atikhom` from commit `192a408` and emitted
+  the real stable branch URL
+  `https://feat-ticket-01-pwa-foundatio.smart-smile-rock-atikhom.pages.dev`. No credential value
+  was read or recorded in the repository.
+- Live verification against the immutable deployment
+  `https://2c8fa50f.smart-smile-rock-atikhom.pages.dev/` returned the exact committed CSP,
+  Permissions Policy, Referrer Policy, nosniff, and HSTS headers. Production-browser checks passed
+  at 390 by 844, 844 by 390, 768 by 1024, and 1440 by 900; the privacy dialog opened and closed
+  without a CSP or console error, while camera requests and persistence state remained zero.
