@@ -4,7 +4,7 @@
 
 **Blocked by:** 08 — Complete the first Final Photo path.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] Candidate validity rechecks active generation, exactly one face, Face Continuity, Capture Zone/size, Smile Score, darkness, and sharpness.
 - [ ] Sharpness uses variance of the Laplacian on the normalized face ROI and rejects scores below 80 before enhancement.

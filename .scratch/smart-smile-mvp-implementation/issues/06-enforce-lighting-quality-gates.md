@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Guide one Participant into the Capture Zone.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] Face-ROI Y10/Y50/Y90 and full-frame median are computed from the approved inset region without changing the preview's color semantics.
 - [ ] Face Y50 below 32 or Y10 below 8 is a hard darkness failure that cannot be rescued by enhancement.

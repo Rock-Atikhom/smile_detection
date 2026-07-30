@@ -1,20 +1,75 @@
-# Smart Smile Capture
+# Smart Smile
 
-A local, CPU-only desktop application that verifies a sustained Smile Score and captures one high-quality Final Photo from a single Participant.
+Smart Smile is migrating to a responsive PWA. The existing Python desktop application is
+preserved as a frozen behavior reference in `apps/desktop-reference`; new product work will
+land in the web application.
 
-Implementation is proceeding through the approved tracer-bullet tickets in `.scratch/smart-smile-mvp-implementation/issues`.
+## Delivery definitions
 
-## Run the live camera preview
+- **Web** is the responsive browser application in `apps/web`, built as static assets for
+  Cloudflare Pages.
+- **Local** is a developer-owned machine. It can run the fast Vite development server or
+  locally preview the exact production build.
+- **Mobile** is the same Web application in a touch-first mobile browser; it is not a native
+  iOS or Android application.
+
+## Web development and validation
+
+Run these commands from the repository root:
 
 ```bash
-uv sync --frozen --all-groups
-uv run smart-smile
+nvm use
+npm install --global npm@10.9.7
+npm ci
+npm run web:dev
 ```
 
-On first launch, allow camera access when macOS asks. Smart Smile opens the built-in
-camera through AVFoundation, shows a mirrored preview, and remains in
-`CAMERA_WARMUP` for two seconds before reporting `READY`. Press `q` or Escape to
-exit. Use `uv run smart-smile --debug` to show delivered resolution, measured FPS,
-and mailbox replacement diagnostics.
+The development command starts Vite. For a real production-build preview, use a second
+terminal after stopping the development server:
 
-The supported native macOS environment is Apple Silicon on macOS 13 or later. The approved OpenCV contrib 4.11.0.86 ARM64 wheel sets that combined floor. Hash-locked runtime resolutions are retained separately for Apple-Silicon macOS and Windows x86-64.
+```bash
+npm run web:build
+npm run web:preview
+```
+
+Run the complete web quality gates with:
+
+```bash
+npm run web:format:check
+npm run web:lint
+npm run web:typecheck
+npm run web:test
+npx playwright install chromium
+npm run web:build
+npm run web:e2e
+```
+
+`web:build` creates `apps/web/dist` once. `web:e2e` serves that exact bundle with the committed
+production headers and checks the shell at 390x844, 844x390, 768x1024, and 1440x900. The tests
+attach one screenshot for each named viewport.
+
+## Python desktop reference
+
+Run these commands from the repository root:
+
+```bash
+make python-sync
+make python-test
+make python-format-check
+make python-lint
+make python-mypy
+make python-run
+```
+
+`python-run` opens the local desktop camera preview. On first launch, allow camera access
+when macOS asks. Press `q` or Escape to exit; pass `--debug` by running
+`cd apps/desktop-reference && uv run smart-smile --debug`.
+
+The supported native macOS environment is Apple Silicon on macOS 13 or later. Platform locks,
+the verified Face Landmarker model, and its license notices remain with the desktop reference.
+
+## Cloudflare Pages
+
+Follow [the Cloudflare Pages setup guide](docs/deployment/cloudflare-pages.md) to configure the
+private repository's check-gated Direct Upload workflow. A preview URL is intentionally not listed
+here: it is created only after the owner configures the real Cloudflare project and GitHub secrets.

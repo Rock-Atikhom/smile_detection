@@ -4,7 +4,7 @@
 
 **Blocked by:** 10 — Make the Capture Session race-safe.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] Normal mode uses the mirrored preview, centered Capture Zone, top-left status, bottom-center Smile Score/Verification progress, large Countdown, and unmirrored Cooldown confirmation.
 - [ ] Guidance follows the approved priority from fatal/camera through multiple faces, darkness, position/size, continuity, smile, quality, processing/retry, and success.

@@ -1,0 +1,324 @@
+@import "tailwindcss";
+
+:root {
+  --canvas: #f5f7f6;
+  --camera-surround: #101615;
+  --surface: #ffffff;
+  --text-strong: #17211f;
+  --text-muted: #52615d;
+  --action: #0d766e;
+  --action-hover: #095f59;
+  --ready: #16856d;
+  --guidance: #9a6400;
+  --danger: #b42318;
+  --focus: #6d5ce7;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-strong);
+  background: var(--canvas);
+  font-synthesis: none;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.app-shell {
+  box-sizing: border-box;
+  display: grid;
+  min-height: 100vh;
+  grid-template-rows: auto 1fr auto;
+  padding: max(16px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+}
+
+.site-header,
+.site-footer,
+.foundation-layout {
+  width: min(100%, 1120px);
+  margin-inline: auto;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  min-width: 48px;
+  min-height: 48px;
+  color: var(--text-strong);
+  font-size: 1.125rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.privacy-status {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.privacy-status::before {
+  display: inline-block;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  background: var(--ready);
+  content: "";
+}
+
+.privacy-trigger,
+.privacy-close {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid #7d928b;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text-strong);
+  font-weight: 650;
+}
+
+.privacy-trigger:hover,
+.privacy-close:hover {
+  border-color: var(--action);
+  background: #edf7f4;
+}
+
+.foundation-layout {
+  display: grid;
+  align-content: center;
+  gap: 24px;
+  padding-block: clamp(24px, 6vw, 64px);
+}
+
+.camera-stage {
+  display: grid;
+  min-height: min(56vh, 560px);
+  overflow: hidden;
+  border-radius: 20px;
+  background: var(--camera-surround);
+  place-items: center;
+}
+
+.camera-stage__placeholder {
+  display: grid;
+  width: min(76%, 22rem);
+  aspect-ratio: 4 / 5;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  border: 1px solid rgb(255 255 255 / 0.35);
+  border-radius: 44% 44% 40% 40%;
+  color: #fff;
+  text-align: center;
+}
+
+.camera-stage__placeholder span {
+  font-size: 1.125rem;
+  font-weight: 650;
+}
+
+.camera-stage__placeholder small {
+  max-width: 15rem;
+  color: rgb(255 255 255 / 0.72);
+}
+
+.coach-card {
+  max-width: 28rem;
+  padding: clamp(24px, 5vw, 40px);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgb(23 33 31 / 0.08);
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--action);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+
+.coach-card > p:not(.eyebrow):not(.next-step) {
+  margin: 16px 0 24px;
+  color: var(--text-muted);
+  font-size: 1.0625rem;
+  line-height: 1.55;
+}
+
+.primary-action {
+  width: 100%;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--action);
+  color: #fff;
+  font-weight: 700;
+}
+
+.primary-action:disabled {
+  cursor: not-allowed;
+  background: #aebbb7;
+  color: #31423d;
+}
+
+.next-step {
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+
+.site-footer {
+  padding-top: 16px;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.privacy-dialog {
+  width: min(calc(100vw - 32px), 32rem);
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  margin: auto;
+  overflow: auto;
+  padding: clamp(24px, 5vw, 40px);
+  border: 0;
+  border-radius: 24px;
+  background: var(--surface);
+  color: var(--text-strong);
+  box-shadow: 0 18px 56px rgb(16 22 21 / 0.25);
+}
+
+.privacy-dialog::backdrop {
+  background: rgb(16 22 21 / 0.48);
+}
+
+.privacy-dialog h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1.5rem;
+  line-height: 1.2;
+}
+
+.privacy-dialog p {
+  margin: 12px 0 16px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.privacy-dialog ul {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 24px;
+  padding-left: 1.25rem;
+  color: var(--text-strong);
+  line-height: 1.45;
+}
+
+.privacy-close {
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .foundation-layout {
+    grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr);
+    align-items: center;
+  }
+
+  .camera-stage {
+    min-height: min(68vh, 640px);
+  }
+}
+
+@media (min-width: 768px) and (max-height: 600px) {
+  .app-shell {
+    height: 100dvh;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+    padding-block: max(8px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-bottom));
+  }
+
+  .foundation-layout {
+    min-height: 0;
+    align-items: stretch;
+    padding-block: 8px;
+  }
+
+  .camera-stage {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .coach-card {
+    box-sizing: border-box;
+    max-height: 100%;
+    padding: 16px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .coach-card > p:not(.eyebrow):not(.next-step) {
+    margin: 8px 0 12px;
+    font-size: 1rem;
+  }
+
+  .site-footer {
+    padding-top: 4px;
+  }
+}
+
+@media (max-width: 560px) {
+  .privacy-status {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

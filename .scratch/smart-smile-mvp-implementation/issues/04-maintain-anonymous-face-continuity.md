@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Guide one Participant into the Capture Zone.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] A new Participant becomes continuity-eligible only after three consecutive matches over roughly 150 ms.
 - [ ] Matching enforces the approved center-distance, height-ratio, and normalized anchor-geometry limits and adapts the reference by the approved factor.

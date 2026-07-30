@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: superseded-for-new-development — preserved as desktop reference
 
 # Smart Smile Detection & Capture MVP
 

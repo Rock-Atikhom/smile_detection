@@ -4,7 +4,7 @@
 
 **Blocked by:** 10 — Make the Capture Session race-safe.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] The complete camera, vision, smile, quality, timing, storage, logging, and UI TOML sections implement the approved defaults and validation ranges.
 - [ ] Configuration precedence remains built-in defaults, selected TOML, then explicit camera/config/debug CLI overrides, with no environment-variable overrides.
