@@ -252,6 +252,7 @@ export class CameraSession {
     try {
       stream = await this.requestWithTimeout(constraints, epoch, abort.signal);
     } catch (error) {
+      if (this.attemptAbort === abort) this.attemptAbort = undefined;
       if (epoch !== this.requestEpoch || abort.signal.aborted)
         return { epoch, outcome: "superseded" };
       if (!isSwitch) this.setError(error);

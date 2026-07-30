@@ -167,6 +167,21 @@ describe("camera session lifecycle", () => {
     expect(session.snapshot.state).toBe("stopped");
   });
 
+  it("does not resume after a pre-stream request failure", async () => {
+    const { getUserMedia, session } = createHarness({
+      getUserMedia: vi.fn(() => Promise.reject({ name: "NotAllowedError" })),
+    });
+    await session.start();
+    session.setVisibility(false);
+    await session.setVisibility(true);
+
+    expect(getUserMedia).toHaveBeenCalledOnce();
+    expect(session.snapshot).toMatchObject({
+      reason: "denied-permission",
+      state: "recoverable-error",
+    });
+  });
+
   it("suspends an in-flight permission request while the tab is hidden", async () => {
     let resolveStream!: (stream: MediaStream) => void;
     const { session } = createHarness({

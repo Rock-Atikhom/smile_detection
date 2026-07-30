@@ -164,13 +164,13 @@ describe("Smart Smile camera session", () => {
   });
 
   it("renders the actionable switch-failure recovery while retaining the preview", async () => {
-    const { stream } = makeStream();
-    installCamera(
-      vi
-        .fn()
-        .mockResolvedValueOnce(stream)
-        .mockRejectedValueOnce({ name: "NotReadableError" }),
-    );
+    const { stream, track } = makeStream();
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValueOnce(stream)
+      .mockRejectedValueOnce({ name: "NotReadableError" })
+      .mockImplementationOnce(() => new Promise<MediaStream>(() => undefined));
+    installCamera(getUserMedia);
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
@@ -190,6 +190,9 @@ describe("Smart Smile camera session", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Switch camera" })).toBeEnabled();
     expect(screen.getByLabelText("Live camera preview")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Switch camera" }));
+    expect(getUserMedia).toHaveBeenCalledTimes(3);
+    expect(track.stop).not.toHaveBeenCalled();
   });
 
   it("keeps diagnostics allowlisted and restores focus when Help & system status closes", async () => {

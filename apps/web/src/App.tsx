@@ -280,7 +280,8 @@ export default function App() {
     snapshot.state === "recoverable-error";
   const recovery = snapshot.state === "recoverable-error";
   const runAction = () => {
-    if (
+    if (snapshot.reason === "switch-failed") switchCamera();
+    else if (
       snapshot.state === "privacy-introduction" ||
       snapshot.state === "stopped"
     )
@@ -291,7 +292,6 @@ export default function App() {
       snapshot.state === "ready"
     )
       stop();
-    else if (snapshot.reason === "switch-failed") switchCamera();
     else if (
       snapshot.reason === "insecure-context" ||
       snapshot.reason === "unsupported-camera-api"
