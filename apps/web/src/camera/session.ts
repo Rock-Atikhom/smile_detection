@@ -156,7 +156,18 @@ export class CameraSession {
   }
   async restart() {
     this.invalidateInFlightAndOwned();
-    await this.start();
+    const hadRememberedChoice = Boolean(
+      this.lastDeviceId || this.lastFacingMode,
+    );
+    await this.start(hadRememberedChoice);
+    if (
+      hadRememberedChoice &&
+      this.snapshotValue.state === "recoverable-error" &&
+      (this.snapshotValue.reason === "missing-camera" ||
+        this.snapshotValue.reason === "overconstrained-request")
+    ) {
+      await this.start(false);
+    }
   }
 
   async switchCamera() {
@@ -195,7 +206,9 @@ export class CameraSession {
       await this.deps.restore?.(oldStream, restoreAbort.signal);
       if (epoch !== this.requestEpoch || restoreAbort.signal.aborted) return;
       this.activeTrack = oldTrack;
-      this.setSnapshot({ ...oldSnapshot, reason: "switch-failed" });
+      const restoredSnapshot: Partial<CameraSnapshot> = { ...oldSnapshot };
+      delete restoredSnapshot.diagnostics;
+      this.setSnapshot({ ...restoredSnapshot, reason: "switch-failed" });
       if (oldSnapshot.state === "warm-up") this.scheduleWarmup(epoch);
     } catch (error) {
       if (epoch !== this.requestEpoch || restoreAbort.signal.aborted) return;

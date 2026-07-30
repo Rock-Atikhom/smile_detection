@@ -261,6 +261,10 @@ Camera request:
 - mobile prefers user-facing;
 - desktop omits facingMode unless a prior in-session choice exists.
 
+An interruption restart or participant Stop then Start preserves the last delivered in-session
+camera choice. If that remembered exact device is missing or overconstrained, one browser-default
+request is used as the explicit fallback so recovery cannot loop on an unavailable camera.
+
 Delivered track settings and decoded video dimensions are authoritative. A minimum decoded frame of 640 by 480 is required for automatic capture unless release validation approves an equivalent portrait resolution.
 
 Permission is requested only after the privacy-introduction action. The app maps NotAllowed, NotFound, NotReadable, Overconstrained, Abort, and inactive-document failures to stable user guidance.

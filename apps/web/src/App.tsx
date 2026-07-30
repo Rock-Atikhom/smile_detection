@@ -80,6 +80,7 @@ function NativeDialog({
   descriptionId,
   open,
   setOpen,
+  surfaceClassName,
   title,
 }: {
   children: ReactNode;
@@ -87,6 +88,7 @@ function NativeDialog({
   descriptionId: string;
   open: boolean;
   setOpen: (open: boolean) => void;
+  surfaceClassName?: string;
   title: string;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -106,7 +108,7 @@ function NativeDialog({
       <dialog
         aria-describedby={descriptionId}
         aria-labelledby={`${descriptionId}-title`}
-        className="privacy-dialog"
+        className={`privacy-dialog${surfaceClassName ? ` ${surfaceClassName}` : ""}`}
         onCancel={(event) => {
           event.preventDefault();
           setOpen(false);
@@ -198,6 +200,7 @@ function SystemStatus({
         descriptionId="system-status-description"
         open={effectiveOpen}
         setOpen={setEffectiveOpen}
+        surfaceClassName="system-status-dialog"
         title="Help & system status"
       >
         <dl className="diagnostics-list">
@@ -322,11 +325,8 @@ export default function App() {
   }, [recovery, snapshot.reason]);
   const runAction = () => {
     if (snapshot.reason === "switch-failed") switchCamera();
-    else if (
-      snapshot.state === "privacy-introduction" ||
-      snapshot.state === "stopped"
-    )
-      start();
+    else if (snapshot.state === "privacy-introduction") start();
+    else if (snapshot.state === "stopped") restart();
     else if (
       snapshot.state === "camera-starting" ||
       snapshot.state === "camera-switching" ||

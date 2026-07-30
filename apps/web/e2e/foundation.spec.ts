@@ -119,7 +119,9 @@ test("opens the privacy dialog under production CSP without requesting camera or
   await expect
     .poll(() =>
       page.evaluate(async () => ({
+        cacheStorageEntries: (await caches.keys()).length,
         canvasElements: document.querySelectorAll("canvas").length,
+        cookies: document.cookie,
         fileInputs: document.querySelectorAll('input[type="file"]').length,
         indexedDatabases:
           typeof indexedDB.databases === "function"
@@ -135,7 +137,9 @@ test("opens the privacy dialog under production CSP without requesting camera or
       })),
     )
     .toEqual({
+      cacheStorageEntries: 0,
       canvasElements: 0,
+      cookies: "",
       fileInputs: 0,
       indexedDatabases: 0,
       localStorageEntries: 0,
@@ -335,6 +339,53 @@ test("keeps camera actions reachable at the 720 by 450 CSS viewport produced by 
     .toBe(true);
 });
 
+test("reflows camera actions at the 360 by 225 CSS viewport produced by 400 percent zoom", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 225 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Continue to camera" }).click();
+
+  for (const name of ["Stop camera", "Help & system status"]) {
+    const control = page.getByRole("button", { name });
+    await control.scrollIntoViewIfNeeded();
+    await expect(control).toBeInViewport();
+    await control.focus();
+    await expect(control).toBeFocused();
+  }
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+    )
+    .toBe(true);
+});
+
+for (const viewport of [
+  { mode: "mobile-sheet", width: 390, height: 844 },
+  { mode: "desktop-drawer", width: 1440, height: 900 },
+] as const) {
+  test(`presents system status as a ${viewport.mode}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await page.getByRole("button", { name: "Help & system status" }).click();
+    const dialog = page.getByRole("dialog", { name: "Help & system status" });
+    await expect(dialog).toBeVisible();
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    if (viewport.mode === "mobile-sheet") {
+      expect(box!.height).toBeLessThanOrEqual(viewport.height * 0.7 + 1);
+      expect(box!.y + box!.height).toBeGreaterThanOrEqual(viewport.height - 1);
+    } else {
+      expect(box!.height).toBeGreaterThanOrEqual(viewport.height - 1);
+      expect(box!.x + box!.width).toBeGreaterThanOrEqual(viewport.width - 1);
+    }
+  });
+}
+
 test("shows Switch camera only after permitted video inputs reveal a choice", async ({
   page,
 }) => {
@@ -364,6 +415,14 @@ test("shows Switch camera only after permitted video inputs reveal a choice", as
   await expect(
     page.getByRole("button", { name: "Switch camera" }),
   ).toBeVisible();
+  const switchCamera = page.getByRole("button", { name: "Switch camera" });
+  await switchCamera.scrollIntoViewIfNeeded();
+  await expect(switchCamera).toBeInViewport();
+  const box = await switchCamera.boundingBox();
+  expect(box?.height).toBeGreaterThanOrEqual(48);
+  expect(box?.width).toBeGreaterThanOrEqual(48);
+  await switchCamera.focus();
+  await expect(switchCamera).toBeFocused();
 });
 
 test("hides Switch camera when a permitted stream exposes only one choice", async ({
@@ -393,17 +452,26 @@ test("keeps application storage empty during a camera session", async ({
   await expect
     .poll(() =>
       page.evaluate(async () => ({
+        cacheStorageEntries: (await caches.keys()).length,
+        cookies: document.cookie,
         indexedDatabases:
           typeof indexedDB.databases === "function"
             ? (await indexedDB.databases()).length
             : 0,
         localStorageEntries: localStorage.length,
+        serviceWorkers:
+          "serviceWorker" in navigator
+            ? (await navigator.serviceWorker.getRegistrations()).length
+            : 0,
         sessionStorageEntries: sessionStorage.length,
       })),
     )
     .toEqual({
+      cacheStorageEntries: 0,
+      cookies: "",
       indexedDatabases: 0,
       localStorageEntries: 0,
+      serviceWorkers: 0,
       sessionStorageEntries: 0,
     });
 });

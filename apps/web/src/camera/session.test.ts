@@ -285,6 +285,12 @@ describe("camera session lifecycle", () => {
       state: "warm-up",
     });
     expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(session.snapshot.diagnostics).toEqual(
+      expect.arrayContaining([
+        "state:camera-switching",
+        "reason:switch-failed",
+      ]),
+    );
   });
 
   it("cannot let a superseded switch overwrite an intentional stop", async () => {
@@ -483,6 +489,88 @@ describe("camera session lifecycle", () => {
     expect(session.snapshot).toMatchObject({
       facingMode: "environment",
       generation: 4,
+      state: "warm-up",
+    });
+  });
+
+  it("keeps the delivered rear-camera choice across interruption and intentional restart", async () => {
+    const frontTrack = makeTrack({ deviceId: "front", facingMode: "user" });
+    const rearTrack = makeTrack({
+      deviceId: "rear",
+      facingMode: "environment",
+    });
+    const interruptedRearTrack = makeTrack({
+      deviceId: "rear",
+      facingMode: "environment",
+    });
+    const stoppedRearTrack = makeTrack({
+      deviceId: "rear",
+      facingMode: "environment",
+    });
+    const { getUserMedia, session } = createHarness({
+      enumerateDevices: () =>
+        Promise.resolve([
+          { deviceId: "front", kind: "videoinput" },
+          { deviceId: "rear", kind: "videoinput" },
+        ] as MediaDeviceInfo[]),
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(frontTrack))
+        .mockResolvedValueOnce(makeStream(rearTrack))
+        .mockResolvedValueOnce(makeStream(interruptedRearTrack))
+        .mockResolvedValueOnce(makeStream(stoppedRearTrack)),
+    });
+
+    await session.start();
+    await Promise.resolve();
+    await session.switchCamera();
+    rearTrack.dispatchEvent(new Event("ended"));
+    await session.restart();
+    session.stop();
+    await session.restart();
+
+    for (const call of getUserMedia.mock.calls.slice(2)) {
+      expect(call[0]).toEqual(
+        expect.objectContaining({
+          video: expect.objectContaining({ deviceId: { exact: "rear" } }),
+        }),
+      );
+    }
+  });
+
+  it("falls back to browser camera selection when a remembered device disappears", async () => {
+    const rememberedTrack = makeTrack({
+      deviceId: "rear",
+      facingMode: "environment",
+    });
+    const fallbackTrack = makeTrack({ deviceId: "front", facingMode: "user" });
+    const { getUserMedia, session } = createHarness({
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(rememberedTrack))
+        .mockRejectedValueOnce({ name: "OverconstrainedError" })
+        .mockResolvedValueOnce(makeStream(fallbackTrack)),
+    });
+
+    await session.start();
+    session.stop();
+    await session.restart();
+
+    expect(getUserMedia.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        video: expect.objectContaining({ deviceId: { exact: "rear" } }),
+      }),
+    );
+    expect(getUserMedia.mock.calls[2]?.[0]).toEqual({
+      audio: false,
+      video: {
+        frameRate: { ideal: 30 },
+        height: { ideal: 720 },
+        width: { ideal: 1280 },
+      },
+    });
+    expect(session.snapshot).toMatchObject({
+      generation: 2,
       state: "warm-up",
     });
   });

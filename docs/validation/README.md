@@ -4,8 +4,10 @@ Web delivery is validated from the repository root with formatting, ESLint, refe
 projects, Vitest, a production build, and Playwright against the built output under production
 headers. Ticket 02 Playwright runs Chromium's synthetic camera and checks a decoded, mirrored,
 contained preview, intentional stop, responsive control reachability at 390x844, 844x390, 768x1024,
-and 1440x900, no post-load application requests, and empty browser storage. The Python reference
-retains its locked 38-test, Ruff, and strict mypy gates.
+1440x900, and 200/400 percent reflow equivalents. It also verifies the mobile system-status sheet,
+desktop drawer, no post-load application requests, and empty IndexedDB, local/session storage, Cache
+Storage, service-worker registrations, and script-visible cookies. The Python reference retains its
+locked 38-test, Ruff, and strict mypy gates.
 
 Real-device preview assessment remains a human-only acceptance check: review this MacBook and one
 phone before marking the criterion complete.
