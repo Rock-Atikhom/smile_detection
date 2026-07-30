@@ -49,9 +49,16 @@ Camera permission, MediaPipe, offline model caching, or photo capture.
 
 ## Task 2 — Build the tested responsive web shell
 
-- Establish the npm workspace and apps/web package with React, TypeScript, Vite, Tailwind, and Radix.
-- Use strict TDD for observable shell behavior: privacy-first wording, semantic structure, responsive content, and no camera request.
-- Implement only the approved ticket-01 shell; do not add camera or inference behavior.
+- Add a private root npm workspace for apps/web and packages/*, one root package-lock.json, Node 22 engine metadata, and exact dependency versions without semver ranges.
+- Pin this verified compatibility set: react 19.2.8, react-dom 19.2.8, @types/react 19.2.17, @types/react-dom 19.2.3, @types/node 26.1.2, TypeScript 6.0.3, Vite 8.1.5, @vitejs/plugin-react 6.0.4, Vitest 4.1.10, Tailwind and @tailwindcss/vite 4.3.3, @radix-ui/react-dialog 1.1.23, @testing-library/react 16.3.2, @testing-library/jest-dom 7.0.0, and jsdom 30.0.1.
+- Create apps/web with React 19, TypeScript, Vite, Tailwind 4 through the Vite plugin, and a Radix Dialog privacy disclosure.
+- Use strict TDD for observable shell behavior. Write and run the component test before App implementation; record the expected failure caused by missing participant-facing behavior, then implement the minimum shell and record the passing run.
+- The shell must expose a semantic header, main region, footer, one h1, the exact heading “Take a smile photo privately,” and the exact promise “Camera and smile detection run on this device. No camera image or photo is uploaded.”
+- “How privacy works” opens an accessible disclosure explaining no account, no upload, no microphone, and no application photo persistence.
+- Show a clearly labeled foundation-preview camera stage with no video element. “Continue to camera” remains visibly and semantically disabled with an explanation that camera setup is the next delivery step.
+- A test must prove initial render and interaction never call navigator.mediaDevices.getUserMedia, even when that API is present.
+- Implement the approved calm visual tokens, at least 48-by-48 CSS-pixel controls, visible focus, reduced-motion handling, safe-area padding, and responsive single-column mobile/two-column desktop layout.
+- Do not add camera streams, MediaPipe, service workers, offline behavior, capture, diagnostics, or photo behavior.
 
 ## Task 3 — Add reproducible quality and delivery gates
 

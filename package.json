@@ -1,0 +1,18 @@
+{
+  "name": "smart-smile",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "web:dev": "npm run dev --workspace=@smart-smile/web",
+    "web:test": "npm run test --workspace=@smart-smile/web",
+    "web:typecheck": "npm run typecheck --workspace=@smart-smile/web",
+    "web:build": "npm run build --workspace=@smart-smile/web"
+  }
+}
