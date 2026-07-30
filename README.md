@@ -18,6 +18,8 @@ land in the web application.
 Run these commands from the repository root:
 
 ```bash
+nvm use
+npm install --global npm@10.9.7
 npm ci
 npm run web:dev
 ```
@@ -38,12 +40,13 @@ npm run web:lint
 npm run web:typecheck
 npm run web:test
 npx playwright install chromium
+npm run web:build
 npm run web:e2e
 ```
 
-`web:e2e` rebuilds `apps/web/dist`, serves it with Vite's production preview, and checks the
-shell at 390x844, 844x390, 768x1024, and 1440x900. The tests attach one screenshot for each
-named viewport.
+`web:build` creates `apps/web/dist` once. `web:e2e` serves that exact bundle with the committed
+production headers and checks the shell at 390x844, 844x390, 768x1024, and 1440x900. The tests
+attach one screenshot for each named viewport.
 
 ## Python desktop reference
 
@@ -67,6 +70,6 @@ the verified Face Landmarker model, and its license notices remain with the desk
 
 ## Cloudflare Pages
 
-Follow [the Cloudflare Pages setup guide](docs/deployment/cloudflare-pages.md) to connect the
-private GitHub repository and deploy the Web application. A preview URL is intentionally not
-listed here: it is created only after the Cloudflare project has been connected.
+Follow [the Cloudflare Pages setup guide](docs/deployment/cloudflare-pages.md) to configure the
+private repository's check-gated Direct Upload workflow. A preview URL is intentionally not listed
+here: it is created only after the owner configures the real Cloudflare project and GitHub secrets.

@@ -38,6 +38,7 @@ export default tseslint.config(
     files: [
       "apps/web/src/**/*.test.{ts,tsx}",
       "apps/web/e2e/**/*.ts",
+      "apps/web/e2e/**/*.mjs",
       "apps/web/playwright.config.ts",
     ],
     languageOptions: {

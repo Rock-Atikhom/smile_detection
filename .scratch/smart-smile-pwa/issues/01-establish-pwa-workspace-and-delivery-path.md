@@ -61,9 +61,9 @@ Camera permission, MediaPipe, offline model caching, or photo capture.
 - Pin ESLint 10.8.0, @eslint/js 10.0.1, typescript-eslint 8.65.0, globals 17.8.0, eslint-plugin-react-hooks 7.1.1, eslint-plugin-react-refresh 0.5.3, Prettier 3.9.6, and @playwright/test 1.62.0 without version ranges.
 - Add root and web commands for development, formatting check, lint, type-check, unit/component tests, Playwright browser tests, production build, and locally serving the production build.
 - Add an ESLint flat configuration, Prettier configuration, and Playwright configuration. Browser tests must exercise the real built shell at 390x844, 844x390, 768x1024, and 1440x900; assert the semantic privacy shell, disabled camera action, absence of video, and no horizontal page overflow; attach a screenshot for each viewport.
-- Extend GitHub CI with a Node 22 web job using npm ci and all web gates. Preserve the existing Python job and its exact checks.
+- Extend GitHub CI with the exact Node 22.22.2 and npm 10.9.7 web toolchain, npm ci, and all web gates. Preserve the existing Python job and its exact checks.
 - Add apps/web/public/_headers so Cloudflare Pages applies: a self-only default/script/style/connect policy, no objects, self base/form, no framing, camera self only, microphone disabled, no referrer, nosniff, and HTTPS upgrade. Keep the policy compatible with later self-hosted workers/WASM by documenting that ticket 03 will add only the minimum verified directives it requires.
-- Add docs/deployment/cloudflare-pages.md with the private GitHub repository connection, root npm build command, apps/web/dist output, Node 22 setting, preview-deployment behavior, production branch, and post-deploy header check. Do not claim a preview URL until the external Cloudflare project is actually connected.
+- Add docs/deployment/cloudflare-pages.md with a private-repository GitHub Actions Direct Upload workflow that deploys only the already validated apps/web/dist artifact, plus exact runtime settings, preview/production behavior, and the post-deploy header check. Keep Cloudflare Git integration disabled so it cannot bypass CI. Do not claim a preview URL until the external project is actually configured.
 - Expand the root README with the formal Web, Local, and Mobile definitions plus exact development, local production, validation, Python-reference, and Cloudflare setup commands.
 - Verify the production build contains _headers and no camera, MediaPipe, service-worker, photo, or analytics code.
 
@@ -79,27 +79,42 @@ Camera permission, MediaPipe, offline model caching, or photo capture.
 Verified locally on 2026-07-30 from the repository root with Node 22.22.2 and the committed
 lockfiles:
 
-- `npm ci` completed with zero reported vulnerabilities; formatting, ESLint, TypeScript,
-  two Vitest component tests, and the production build passed.
-- Playwright passed its delivery-policy checks and the built-shell checks at 390 by 844,
-  844 by 390, 768 by 1024, and 1440 by 900. Each viewport produced a correctly sized
-  screenshot artifact, the camera action stayed disabled, no video existed, and no page
-  overflow was detected.
+- `npm ci` installed the locked workspace with zero reported vulnerabilities. Prettier, ESLint,
+  all three referenced TypeScript projects, two Vitest component tests, and the production build
+  passed under the pinned Node 22.22.2/npm 10.9.7 toolchain.
+- Playwright passed 11 tests: five parsed delivery-policy checks, four built-shell viewport checks,
+  a production-CSP dialog regression, and a computed non-text contrast regression. The 390 by 844,
+  844 by 390, 768 by 1024, and 1440 by 900 screenshots have those exact pixel dimensions. The
+  compact-landscape coach controls scroll independently while the camera state and footer remain
+  visible; the action and explanation are reachable.
+- The Radix-controlled privacy disclosure uses the browser's native modal boundary, so it traps and
+  restores focus without Radix's runtime style injection. Opening and closing it under the actual
+  production CSP produced no policy violation, while the self-only `style-src` remained unchanged.
+  The privacy control boundary also passes the 3:1 non-text contrast threshold.
 - `apps/web/dist/_headers` is byte-identical to `apps/web/public/_headers`. The policy includes
-  the documented CSP HTTPS upgrade and restrictive Cloudflare Pages headers.
-- The production bundle is 230.93 kB JavaScript and 8.37 kB CSS before gzip. Source inspection,
+  the exact parsed CSP/Permissions Policy directives, HTTPS upgrade, and restrictive Cloudflare
+  Pages headers. Browser tests serve the built files with those response headers rather than a
+  header-free development server.
+- The production bundle is 206.41 kB JavaScript and 8.89 kB CSS before gzip. Source inspection,
   browser checks, and the component guard found no camera acquisition, MediaPipe, service
-  worker, capture, persistence, or analytics behavior. The runtime made only the three expected
-  same-origin shell requests and left browser storage empty.
+  worker, capture, persistence, or analytics behavior. The runtime regression found no video,
+  canvas, file input, camera request, service-worker registration, or browser-storage state.
 - All required npm dependency versions are exact in the web manifest and resolve to those
   versions through the root lockfile. The empty `packages/contracts` boundary is protected by
   a delivery test and contains no scripts, dependencies, or runtime implementation.
 - `make python-sync`, the 38 Python tests, Ruff formatting and lint checks, and strict mypy all
   passed for the preserved desktop reference.
+- GitHub Actions builds the web bundle once, tests that output, and passes it as an immutable
+  short-lived artifact to a Cloudflare Direct Upload job that depends on both web and Python gates.
+  Action references, Wrangler, Node, and npm are exact pins. The deployment remains intentionally
+  disabled until the owner provides the real project variables and credentials.
+- Minimal tracked architecture, privacy, and validation indexes now anchor the approved docs
+  topology without implementing later runtime lanes.
 - No Cloudflare credential indicator, project configuration, verified deployment hostname, or
   preview-response evidence was available in this environment. No URL has been guessed.
 
-Remaining human-owned action: the repository owner must connect the private GitHub repository
-to a Cloudflare Pages project using `docs/deployment/cloudflare-pages.md`, create a pull-request
-preview, record its real URL, and verify its live response headers. Only then may the two open
-Cloudflare acceptance criteria be checked and this ticket marked completed.
+Remaining human-owned action: the repository owner must create a real Cloudflare Pages Direct
+Upload project, add the documented GitHub secrets and project variables, enable the deployment
+job, and open or update a pull request. Record the URL emitted by that successful gated preview
+and verify its live response headers. Only then may the two open Cloudflare acceptance criteria
+be checked and this ticket marked completed.

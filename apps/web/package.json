@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "format:check": "prettier --check 'src/**/*.{ts,tsx,css}' 'e2e/**/*.ts' playwright.config.ts vite.config.ts 'tsconfig*.json' index.html package.json ../../eslint.config.mjs ../../prettier.config.mjs ../../package.json",
+    "format:check": "prettier --check --ignore-path ../../.gitignore . ../../eslint.config.mjs ../../prettier.config.mjs ../../package.json ../../.github/workflows/ci.yml ../../docs ../../README.md",
     "lint": "eslint .",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run src",
-    "test:e2e": "npm run build && env -u NO_COLOR playwright test",
+    "test:e2e": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {

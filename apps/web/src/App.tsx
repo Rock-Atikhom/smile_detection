@@ -1,4 +1,63 @@
 import * as Dialog from "@radix-ui/react-dialog";
+import { useEffect, useRef, useState } from "react";
+
+function PrivacyDisclosure() {
+  const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (open && !dialog.open) {
+      if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+      }
+      // jsdom exposes an incomplete dialog API; keep semantics testable there.
+      if (!dialog.open) dialog.setAttribute("open", "");
+    } else if (!open && dialog.open) {
+      if (typeof dialog.close === "function") {
+        dialog.close();
+      } else {
+        dialog.removeAttribute("open");
+      }
+    }
+  }, [open]);
+
+  return (
+    <Dialog.Root modal={false} open={open} onOpenChange={setOpen}>
+      <Dialog.Trigger className="privacy-trigger" type="button">
+        How privacy works
+      </Dialog.Trigger>
+      <Dialog.Portal forceMount>
+        <dialog
+          aria-describedby="privacy-description"
+          aria-labelledby="privacy-title"
+          className="privacy-dialog"
+          onCancel={(event) => {
+            event.preventDefault();
+            setOpen(false);
+          }}
+          ref={dialogRef}
+        >
+          <Dialog.Title id="privacy-title">How privacy works</Dialog.Title>
+          <Dialog.Description id="privacy-description">
+            Smart Smile is designed to keep this experience on your device.
+          </Dialog.Description>
+          <ul>
+            <li>No account is required.</li>
+            <li>No camera image or photo is uploaded.</li>
+            <li>Microphone access is not used.</li>
+            <li>The application does not persist photos.</li>
+          </ul>
+          <Dialog.Close className="privacy-close" type="button">
+            Close privacy details
+          </Dialog.Close>
+        </dialog>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
 
 export default function App() {
   return (
@@ -13,30 +72,7 @@ export default function App() {
         </a>
         <div className="header-actions">
           <span className="privacy-status">On-device</span>
-          <Dialog.Root>
-            <Dialog.Trigger className="privacy-trigger" type="button">
-              How privacy works
-            </Dialog.Trigger>
-            <Dialog.Portal>
-              <Dialog.Overlay className="privacy-overlay" />
-              <Dialog.Content className="privacy-dialog">
-                <Dialog.Title>How privacy works</Dialog.Title>
-                <Dialog.Description>
-                  Smart Smile is designed to keep this experience on your
-                  device.
-                </Dialog.Description>
-                <ul>
-                  <li>No account is required.</li>
-                  <li>No camera image or photo is uploaded.</li>
-                  <li>Microphone access is not used.</li>
-                  <li>The application does not persist photos.</li>
-                </ul>
-                <Dialog.Close className="privacy-close" type="button">
-                  Close privacy details
-                </Dialog.Close>
-              </Dialog.Content>
-            </Dialog.Portal>
-          </Dialog.Root>
+          <PrivacyDisclosure />
         </div>
       </header>
 
