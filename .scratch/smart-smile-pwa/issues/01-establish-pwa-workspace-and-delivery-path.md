@@ -40,3 +40,28 @@ Planning pack approval.
 ## Not included
 
 Camera permission, MediaPipe, offline model caching, or photo capture.
+
+## Task 1 — Preserve the Python reference inside the workspace
+
+- Move the existing Python package, tests, configuration, model, notices, locks, and research documentation under apps/desktop-reference.
+- Keep root-level developer commands that make the Python reference easy to install, test, lint, type-check, and run.
+- Prove the 38-test baseline and existing quality gates still pass from the new topology.
+
+## Task 2 — Build the tested responsive web shell
+
+- Establish the npm workspace and apps/web package with React, TypeScript, Vite, Tailwind, and Radix.
+- Use strict TDD for observable shell behavior: privacy-first wording, semantic structure, responsive content, and no camera request.
+- Implement only the approved ticket-01 shell; do not add camera or inference behavior.
+
+## Task 3 — Add reproducible quality and delivery gates
+
+- Add pinned web dependencies, formatting, lint, type-check, unit/component test, Playwright smoke, and production build commands.
+- Extend GitHub CI without weakening the preserved Python checks.
+- Add Cloudflare Pages static configuration and the initial restrictive headers policy.
+- Document Web, Local, Mobile, development, production-preview, Python-reference, and deployment commands.
+
+## Task 4 — Verify and close ticket 01
+
+- Run the complete Python and web validation commands from a clean dependency state.
+- Verify responsive artifacts, security headers, and that no ticket-02 camera functionality was added.
+- Update this ticket with completion evidence and mark it completed only when every acceptance criterion has evidence.

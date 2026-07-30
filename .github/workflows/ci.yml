@@ -31,16 +31,16 @@ jobs:
         run: uv python install 3.12.10
 
       - name: Synchronize locked environment
-        run: uv sync --frozen --all-groups
+        run: make python-sync
 
       - name: Run tests
-        run: uv run pytest -q
+        run: make python-test
 
       - name: Check formatting
-        run: uv run ruff format --check src tests
+        run: make python-format-check
 
       - name: Run lint checks
-        run: uv run ruff check src tests
+        run: make python-lint
 
       - name: Run type checks
-        run: uv run mypy src tests
+        run: make python-mypy
