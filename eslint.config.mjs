@@ -16,11 +16,10 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["apps/web/**/*.{ts,tsx}"],
+    files: ["apps/web/src/**/*.{ts,tsx}"],
     languageOptions: {
       globals: {
         ...globals.browser,
-        ...globals.node,
       },
     },
     plugins: {
@@ -29,7 +28,23 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "react-refresh/only-export-components": [
+        "warn",
+        { allowConstantExport: true },
+      ],
+    },
+  },
+  {
+    files: [
+      "apps/web/src/**/*.test.{ts,tsx}",
+      "apps/web/e2e/**/*.ts",
+      "apps/web/playwright.config.ts",
+    ],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
     },
   },
 );

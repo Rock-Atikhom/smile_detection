@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "format:check": "prettier --check 'src/**/*.{ts,tsx,css}' 'e2e/**/*.ts' index.html package.json",
+    "format:check": "prettier --check 'src/**/*.{ts,tsx,css}' 'e2e/**/*.ts' playwright.config.ts index.html package.json ../../eslint.config.mjs ../../prettier.config.mjs ../../package.json",
     "lint": "eslint .",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
