@@ -152,10 +152,12 @@ test("opens the privacy dialog under the production CSP without exposing the bac
   });
 });
 
-test("privacy controls meet non-text contrast", async ({ page }) => {
+test("privacy trigger boundary meets non-text contrast on both sides", async ({
+  page,
+}) => {
   await page.goto("/");
 
-  const contrast = await page
+  const contrasts = await page
     .getByRole("button", { name: "How privacy works" })
     .evaluate((element) => {
       const toRgb = (value: string) =>
@@ -173,15 +175,21 @@ test("privacy controls meet non-text contrast", async ({ page }) => {
         return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
       };
       const styles = getComputedStyle(element);
-      const foreground = luminance(styles.borderTopColor);
-      const background = luminance(styles.backgroundColor);
-      return (
-        (Math.max(foreground, background) + 0.05) /
-        (Math.min(foreground, background) + 0.05)
+      const border = luminance(styles.borderTopColor);
+      const interior = luminance(styles.backgroundColor);
+      const canvas = luminance(
+        getComputedStyle(document.documentElement).backgroundColor,
       );
+      const contrast = (first: number, second: number) =>
+        (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+      return {
+        interior: contrast(border, interior),
+        exterior: contrast(border, canvas),
+      };
     });
 
-  expect(contrast).toBeGreaterThanOrEqual(3);
+  expect(contrasts.interior).toBeGreaterThanOrEqual(3);
+  expect(contrasts.exterior).toBeGreaterThanOrEqual(3);
 });
 
 declare global {
