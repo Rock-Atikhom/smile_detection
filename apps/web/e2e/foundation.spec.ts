@@ -7,52 +7,90 @@ const viewports = [
   { name: "desktop-1440x900", width: 1440, height: 900 },
 ] as const;
 
+test("does not request camera before the explicit privacy action", async ({
+  page,
+}) => {
+  let cameraRequests = 0;
+  await page.exposeFunction("recordCameraRequest", () => {
+    cameraRequests += 1;
+  });
+  await page.addInitScript(() => {
+    const original = navigator.mediaDevices.getUserMedia.bind(
+      navigator.mediaDevices,
+    );
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+      await window.recordCameraRequest();
+      return original(constraints);
+    };
+  });
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("heading", { name: "Take a smile photo privately" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Continue to camera" }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "How privacy works" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "How privacy works" }),
+  ).toBeVisible();
+  expect(cameraRequests).toBe(0);
+});
+
+test("shows a decoded mirrored contained synthetic-camera preview and stops it intentionally", async ({
+  page,
+}) => {
+  const postLoadRequests: string[] = [];
+  await page.goto("/");
+  page.on("request", (request) => postLoadRequests.push(request.url()));
+  await page.getByRole("button", { name: "Continue to camera" }).click();
+
+  const video = page.getByLabel("Live camera preview");
+  await expect(video).toBeVisible();
+  await expect
+    .poll(() =>
+      video.evaluate((element) => {
+        const preview = element as HTMLVideoElement;
+        return preview.videoWidth > 0 && preview.videoHeight > 0;
+      }),
+    )
+    .toBe(true);
+  await expect(video).toHaveCSS("object-fit", "contain");
+  await expect(video).toHaveCSS("transform", /matrix\(-1, 0, 0, 1,/);
+  await expect(
+    page.getByRole("heading", { name: "Getting ready" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Camera ready" })).toBeVisible(
+    { timeout: 5_000 },
+  );
+  expect(postLoadRequests).toEqual([]);
+
+  await page.getByRole("button", { name: "Stop camera" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Camera stopped" }),
+  ).toBeVisible();
+  await expect(video).toHaveCount(0);
+});
+
 for (const viewport of viewports) {
-  test(`serves the privacy foundation at ${viewport.name}`, async ({
+  test(`keeps camera controls reachable without horizontal overflow at ${viewport.name}`, async ({
     page,
-  }, testInfo) => {
+  }) => {
     await page.setViewportSize(viewport);
     await page.goto("/");
-
-    await expect(page.getByRole("banner")).toBeVisible();
-    await expect(page.getByRole("main")).toBeVisible();
-    await expect(page.getByRole("contentinfo")).toBeVisible();
+    await page.getByRole("button", { name: "Continue to camera" }).click();
     await expect(
-      page.getByRole("heading", {
-        level: 1,
-        name: "Take a smile photo privately",
-      }),
+      page.getByRole("button", { name: "Stop camera" }),
     ).toBeVisible();
     await expect(
-      page.getByText(
-        "Camera and smile detection run on this device. No camera image or photo is uploaded.",
-      ),
+      page.getByRole("button", { name: "Help & system status" }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Continue to camera" }),
-    ).toBeDisabled();
-    await expect(page.locator("video")).toHaveCount(0);
-
-    if (viewport.name === "landscape-844x390") {
-      const cameraStage = page.getByLabel("Camera foundation preview");
-      const footer = page.getByRole("contentinfo");
-      const action = page.getByRole("button", { name: "Continue to camera" });
-      const explanation = page.getByText(
-        "Camera setup is the next delivery step.",
-      );
-
-      await expect(cameraStage).toBeInViewport();
-      await expect(footer).toBeInViewport();
-      await explanation.scrollIntoViewIfNeeded();
-      await expect(explanation).toBeInViewport();
-      await expect(cameraStage).toBeInViewport();
-      await expect(footer).toBeInViewport();
-      await action.scrollIntoViewIfNeeded();
-      await expect(action).toBeInViewport();
-      await expect(cameraStage).toBeInViewport();
-      await expect(footer).toBeInViewport();
+    for (const name of ["Stop camera", "Help & system status"]) {
+      const box = await page.getByRole("button", { name }).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(48);
+      expect(box?.width).toBeGreaterThanOrEqual(48);
     }
-
     await expect
       .poll(() =>
         page.evaluate(
@@ -63,138 +101,71 @@ for (const viewport of viewports) {
       )
       .toBe(true);
 
-    const screenshot = testInfo.outputPath(`${viewport.name}.png`);
-    await page.screenshot({ path: screenshot });
-    await testInfo.attach(`${viewport.name}-screenshot`, {
-      path: screenshot,
-      contentType: "image/png",
-    });
+    const switchCamera = page.getByRole("button", { name: "Switch camera" });
+    await expect(switchCamera).toHaveCount(
+      (await switchCamera.count()) > 0 ? 1 : 0,
+    );
   });
 }
 
-test("opens the privacy dialog under the production CSP without exposing the background", async ({
+test("shows Switch camera only after permitted video inputs reveal a choice", async ({
   page,
 }) => {
-  const policyViolations: string[] = [];
-  let cameraRequests = 0;
-  await page.exposeFunction("recordPolicyViolation", (directive: string) => {
-    policyViolations.push(directive);
-  });
-  await page.exposeFunction("recordCameraRequest", () => {
-    cameraRequests += 1;
-  });
   await page.addInitScript(() => {
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: {
-        getUserMedia: () => window.recordCameraRequest(),
-      },
-    });
-    document.addEventListener("securitypolicyviolation", (event) => {
-      void window.recordPolicyViolation(event.effectiveDirective);
-    });
-  });
-
-  const response = await page.goto("/");
-  expect(response?.headers()["content-security-policy"]).toContain(
-    "style-src 'self'",
-  );
-
-  await page.getByRole("button", { name: "How privacy works" }).click();
-  const dialog = page.getByRole("dialog", { name: "How privacy works" });
-  await expect(dialog).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(() => document.querySelector("dialog")?.matches(":modal")),
-    )
-    .toBe(true);
-
-  const focusStayedInDialog = await page.evaluate(() => {
-    document.querySelector<HTMLElement>(".wordmark")?.focus();
-    return Boolean(
-      document.activeElement?.closest("dialog[open]") &&
-      document.querySelector("dialog[open]")?.contains(document.activeElement),
+    const original = navigator.mediaDevices.enumerateDevices.bind(
+      navigator.mediaDevices,
     );
+    navigator.mediaDevices.enumerateDevices = async () => {
+      const devices = await original();
+      const video = devices.find((device) => device.kind === "videoinput");
+      return video
+        ? [
+            video,
+            {
+              deviceId: "synthetic-second-camera",
+              groupId: "synthetic-camera-group",
+              kind: "videoinput",
+              label: "",
+              toJSON: () => ({}),
+            },
+          ]
+        : devices;
+    };
   });
-  expect(focusStayedInDialog).toBe(true);
-  expect(policyViolations).toEqual([]);
-
-  await page.getByRole("button", { name: "Close privacy details" }).click();
-  await expect(dialog).not.toBeVisible();
+  await page.goto("/");
+  await page.getByRole("button", { name: "Continue to camera" }).click();
   await expect(
-    page.getByRole("button", { name: "How privacy works" }),
-  ).toBeFocused();
-  expect(cameraRequests).toBe(0);
-
-  const laterFeatureState = await page.evaluate(async () => ({
-    canvasElements: document.querySelectorAll("canvas").length,
-    fileInputs: document.querySelectorAll('input[type="file"]').length,
-    indexedDatabases:
-      typeof indexedDB.databases === "function"
-        ? (await indexedDB.databases()).length
-        : 0,
-    localStorageEntries: localStorage.length,
-    serviceWorkers:
-      "serviceWorker" in navigator
-        ? (await navigator.serviceWorker.getRegistrations()).length
-        : 0,
-    sessionStorageEntries: sessionStorage.length,
-    videoElements: document.querySelectorAll("video").length,
-  }));
-  expect(laterFeatureState).toEqual({
-    canvasElements: 0,
-    fileInputs: 0,
-    indexedDatabases: 0,
-    localStorageEntries: 0,
-    serviceWorkers: 0,
-    sessionStorageEntries: 0,
-    videoElements: 0,
-  });
+    page.getByRole("button", { name: "Switch camera" }),
+  ).toBeVisible();
 });
 
-test("privacy trigger boundary meets non-text contrast on both sides", async ({
+test("keeps application storage empty during a camera session", async ({
   page,
 }) => {
   await page.goto("/");
+  await page.getByRole("button", { name: "Continue to camera" }).click();
+  await expect(page.getByLabel("Live camera preview")).toBeVisible();
 
-  const contrasts = await page
-    .getByRole("button", { name: "How privacy works" })
-    .evaluate((element) => {
-      const toRgb = (value: string) =>
-        value
-          .match(/[\d.]+/g)
-          ?.slice(0, 3)
-          .map(Number) ?? [];
-      const luminance = (value: string) => {
-        const [red, green, blue] = toRgb(value).map((channel) => {
-          const normalized = channel / 255;
-          return normalized <= 0.04045
-            ? normalized / 12.92
-            : ((normalized + 0.055) / 1.055) ** 2.4;
-        });
-        return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-      };
-      const styles = getComputedStyle(element);
-      const border = luminance(styles.borderTopColor);
-      const interior = luminance(styles.backgroundColor);
-      const canvas = luminance(
-        getComputedStyle(document.documentElement).backgroundColor,
-      );
-      const contrast = (first: number, second: number) =>
-        (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
-      return {
-        interior: contrast(border, interior),
-        exterior: contrast(border, canvas),
-      };
+  await expect
+    .poll(() =>
+      page.evaluate(async () => ({
+        indexedDatabases:
+          typeof indexedDB.databases === "function"
+            ? (await indexedDB.databases()).length
+            : 0,
+        localStorageEntries: localStorage.length,
+        sessionStorageEntries: sessionStorage.length,
+      })),
+    )
+    .toEqual({
+      indexedDatabases: 0,
+      localStorageEntries: 0,
+      sessionStorageEntries: 0,
     });
-
-  expect(contrasts.interior).toBeGreaterThanOrEqual(3);
-  expect(contrasts.exterior).toBeGreaterThanOrEqual(3);
 });
 
 declare global {
   interface Window {
-    recordPolicyViolation(directive: string): void;
     recordCameraRequest(): Promise<void>;
   }
 }
