@@ -142,6 +142,56 @@ describe("Smart Smile camera session", () => {
     expect(screen.queryByText("NotAllowedError")).not.toBeInTheDocument();
   });
 
+  it("opens Help & system status from an unsupported-browser recovery action", async () => {
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: true,
+    });
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      mediaDevices: { enumerateDevices: vi.fn(() => Promise.resolve([])) },
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(
+      "This browser is not supported yet",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "View help" }));
+    expect(
+      screen.getByRole("dialog", { name: "Help & system status" }),
+    ).toBeVisible();
+  });
+
+  it("renders the actionable switch-failure recovery while retaining the preview", async () => {
+    const { stream } = makeStream();
+    installCamera(
+      vi
+        .fn()
+        .mockResolvedValueOnce(stream)
+        .mockRejectedValueOnce({ name: "NotReadableError" }),
+    );
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+    const video = await screen.findByLabelText("Live camera preview");
+    fireEvent.loadedData(video);
+    await screen.findByRole("heading", { name: "Getting ready" });
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: 2,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Switch camera" }));
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Your current camera is still active",
+      }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Switch camera" })).toBeEnabled();
+    expect(screen.getByLabelText("Live camera preview")).toBeVisible();
+  });
+
   it("keeps diagnostics allowlisted and restores focus when Help & system status closes", async () => {
     const { stream } = makeStream();
     installCamera(() => Promise.resolve(stream), [

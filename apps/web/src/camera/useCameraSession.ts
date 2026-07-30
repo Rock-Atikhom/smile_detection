@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  CAMERA_ATTACHMENT_TIMEOUT_MS,
   CameraSession,
   createInitialCameraSnapshot,
   type CameraSnapshot,
@@ -18,17 +19,38 @@ function isMobileClient() {
 async function attachAndPlay(
   video: HTMLVideoElement | null,
   stream: MediaStream,
+  signal: AbortSignal,
 ) {
   if (!video) throw { name: "InvalidStateError" };
   video.srcObject = stream;
-  await new Promise<void>((resolve) => {
-    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", onAbort);
+      video.removeEventListener("loadeddata", onFrame);
+    };
+    const onAbort = () => {
+      finish();
+      reject({ name: "AbortError" });
+    };
+    const onFrame = () => {
+      finish();
       resolve();
+    };
+    const timeout = setTimeout(() => {
+      finish();
+      reject({ name: "AbortError" });
+    }, CAMERA_ATTACHMENT_TIMEOUT_MS);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      onFrame();
       return;
     }
-    video.addEventListener("loadeddata", () => resolve(), { once: true });
+    video.addEventListener("loadeddata", onFrame, { once: true });
   });
+  if (signal.aborted) throw { name: "AbortError" };
   await video.play();
+  if (signal.aborted) throw { name: "AbortError" };
   return { height: video.videoHeight, width: video.videoWidth };
 }
 
@@ -41,7 +63,8 @@ export function useCameraSession() {
 
   useEffect(() => {
     const camera = new CameraSession({
-      attachAndPlay: (stream) => attachAndPlay(videoRef.current, stream),
+      attachAndPlay: (stream, signal) =>
+        attachAndPlay(videoRef.current, stream, signal),
       detach: () => {
         if (videoRef.current) videoRef.current.srcObject = null;
       },
@@ -55,11 +78,8 @@ export function useCameraSession() {
       },
       isMobile: isMobileClient,
       isSecureContext: () => window.isSecureContext,
-      restore: (stream) => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          void videoRef.current.play();
-        }
+      restore: async (stream, signal) => {
+        await attachAndPlay(videoRef.current, stream, signal);
       },
     });
     setSession(camera);

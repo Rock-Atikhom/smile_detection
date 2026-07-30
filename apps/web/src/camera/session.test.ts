@@ -16,6 +16,7 @@ function makeTrack(
   options: {
     facingMode?: string;
     facingModes?: string[];
+    deviceId?: string;
     height?: number;
     width?: number;
   } = {},
@@ -28,6 +29,7 @@ function makeTrack(
     }) as MediaTrackCapabilities;
   track.getSettings = () => ({
     facingMode: options.facingMode ?? "user",
+    deviceId: options.deviceId,
     height: options.height ?? 720,
     width: options.width ?? 1280,
   });
@@ -47,6 +49,10 @@ function createHarness(
       constraints: MediaStreamConstraints,
     ) => Promise<MediaStream>;
     enumerateDevices?: () => Promise<MediaDeviceInfo[]>;
+    attachAndPlay?: (
+      stream: MediaStream,
+      signal: AbortSignal,
+    ) => Promise<{ height: number; width: number }>;
     mobile?: boolean;
   } = {},
 ) {
@@ -56,8 +62,9 @@ function createHarness(
   const enumerateDevices = vi.fn(
     options.enumerateDevices ?? (() => Promise.resolve([])),
   );
-  const attachAndPlay = vi.fn(() =>
-    Promise.resolve({ height: 720, width: 1280 }),
+  const attachAndPlay = vi.fn(
+    options.attachAndPlay ??
+      (() => Promise.resolve({ height: 720, width: 1280 })),
   );
   const session = new CameraSession({
     attachAndPlay,
@@ -160,6 +167,48 @@ describe("camera session lifecycle", () => {
     expect(session.snapshot.state).toBe("stopped");
   });
 
+  it("suspends an in-flight permission request while the tab is hidden", async () => {
+    let resolveStream!: (stream: MediaStream) => void;
+    const { session } = createHarness({
+      getUserMedia: () =>
+        new Promise((resolve) => {
+          resolveStream = resolve;
+        }),
+    });
+    const pending = session.start();
+    session.setVisibility(false);
+    await pending;
+    const lateTrack = makeTrack();
+    resolveStream(makeStream(lateTrack));
+    await Promise.resolve();
+
+    expect(lateTrack.stop).toHaveBeenCalled();
+    expect(session.snapshot).toMatchObject({
+      reason: "inactive-document",
+      state: "stopped",
+    });
+  });
+
+  it("stops a candidate already acquired but still waiting for its decoded frame", async () => {
+    let resolveAttachment!: (value: { height: number; width: number }) => void;
+    const track = makeTrack();
+    const { attachAndPlay, session } = createHarness({
+      attachAndPlay: () =>
+        new Promise((resolve) => {
+          resolveAttachment = resolve;
+        }),
+      getUserMedia: () => Promise.resolve(makeStream(track)),
+    });
+    const pending = session.start();
+    await vi.waitFor(() => expect(attachAndPlay).toHaveBeenCalledOnce());
+    session.stop();
+    resolveAttachment({ height: 720, width: 1280 });
+    await pending;
+
+    expect(track.stop).toHaveBeenCalled();
+    expect(session.snapshot.state).toBe("stopped");
+  });
+
   it("increments generation only after a stream is attached and enters warm-up", async () => {
     vi.useFakeTimers();
     const { session } = createHarness();
@@ -186,9 +235,63 @@ describe("camera session lifecycle", () => {
     expect(firstTrack.stop).not.toHaveBeenCalled();
     expect(session.snapshot).toMatchObject({
       reason: "switch-failed",
-      state: "ready",
+      state: "warm-up",
     });
     expect(getUserMedia).toHaveBeenCalledTimes(2);
+  });
+
+  it("cannot let a superseded switch overwrite an intentional stop", async () => {
+    let resolveCandidate!: (stream: MediaStream) => void;
+    const firstTrack = makeTrack({ facingModes: ["user", "environment"] });
+    const candidateTrack = makeTrack({ facingMode: "environment" });
+    const { session } = createHarness({
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(firstTrack))
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveCandidate = resolve;
+            }),
+        ),
+    });
+    await session.start();
+    const switching = session.switchCamera();
+    await Promise.resolve();
+    session.stop();
+    resolveCandidate(makeStream(candidateTrack));
+    await switching;
+
+    expect(firstTrack.stop).toHaveBeenCalledOnce();
+    expect(candidateTrack.stop).toHaveBeenCalledOnce();
+    expect(session.snapshot.state).toBe("stopped");
+  });
+
+  it("switches to an enumerated device other than the delivered current device", async () => {
+    const firstTrack = makeTrack({
+      facingModes: ["user", "environment"],
+      deviceId: "second",
+    });
+    const { getUserMedia, session } = createHarness({
+      enumerateDevices: () =>
+        Promise.resolve([
+          { deviceId: "first", kind: "videoinput" },
+          { deviceId: "second", kind: "videoinput" },
+        ] as MediaDeviceInfo[]),
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(firstTrack))
+        .mockResolvedValueOnce(makeStream(makeTrack())),
+    });
+    await session.start();
+    await Promise.resolve();
+    await session.switchCamera();
+
+    expect(getUserMedia).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        video: expect.objectContaining({ deviceId: { exact: "first" } }),
+      }),
+    );
   });
 
   it("validates a switch candidate before replacing the active stream and increments once", async () => {
@@ -245,19 +348,13 @@ describe("camera session lifecycle", () => {
     expect(session.snapshot).toMatchObject({ generation: 2, state: "warm-up" });
   });
 
-  it("invalidates an interrupted track and stops owned tracks on teardown", async () => {
+  it("stops every owned active track on teardown", async () => {
     const track = makeTrack();
     const { session } = createHarness({
       getUserMedia: () => Promise.resolve(makeStream(track)),
     });
     await session.start();
-    track.dispatchEvent(new Event("ended"));
-    expect(session.snapshot).toMatchObject({
-      reason: "interruption",
-      state: "recoverable-error",
-    });
-
     session.dispose();
-    expect(track.stop).toHaveBeenCalled();
+    expect(track.stop).toHaveBeenCalledOnce();
   });
 });

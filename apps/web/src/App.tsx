@@ -148,7 +148,15 @@ function PrivacyDisclosure() {
   );
 }
 
-function SystemStatus({ snapshot }: { snapshot: CameraSnapshot }) {
+function SystemStatus({
+  openRequest,
+  onOpenRequestHandled,
+  snapshot,
+}: {
+  openRequest: boolean;
+  onOpenRequestHandled: () => void;
+  snapshot: CameraSnapshot;
+}) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
@@ -156,8 +164,17 @@ function SystemStatus({ snapshot }: { snapshot: CameraSnapshot }) {
     if (!open && wasOpen.current) triggerRef.current?.focus();
     wasOpen.current = open;
   }, [open]);
+  const effectiveOpen = open || openRequest;
+  const setEffectiveOpen = (nextOpen: boolean) => {
+    if (!nextOpen) onOpenRequestHandled();
+    setOpen(nextOpen);
+  };
   return (
-    <Dialog.Root modal={false} open={open} onOpenChange={setOpen}>
+    <Dialog.Root
+      modal={false}
+      open={effectiveOpen}
+      onOpenChange={setEffectiveOpen}
+    >
       <Dialog.Trigger
         className="secondary-action"
         ref={triggerRef}
@@ -168,8 +185,8 @@ function SystemStatus({ snapshot }: { snapshot: CameraSnapshot }) {
       <NativeDialog
         closeLabel="Close system status"
         descriptionId="system-status-description"
-        open={open}
-        setOpen={setOpen}
+        open={effectiveOpen}
+        setOpen={setEffectiveOpen}
         title="Help & system status"
       >
         <dl className="diagnostics-list">
@@ -205,6 +222,7 @@ function SystemStatus({ snapshot }: { snapshot: CameraSnapshot }) {
 }
 
 function coachCopy(snapshot: CameraSnapshot): Copy {
+  if (snapshot.reason === "switch-failed") return errorCopy["switch-failed"];
   if (snapshot.state === "privacy-introduction") {
     return {
       action: "Continue to camera",
@@ -253,6 +271,7 @@ export default function App() {
   const { restart, snapshot, start, stop, switchCamera, videoRef } =
     useCameraSession();
   const copy = coachCopy(snapshot);
+  const [helpRequest, setHelpRequest] = useState(false);
   const active =
     snapshot.state === "permission-pending" ||
     snapshot.state === "camera-starting" ||
@@ -277,7 +296,7 @@ export default function App() {
       snapshot.reason === "insecure-context" ||
       snapshot.reason === "unsupported-camera-api"
     )
-      return;
+      setHelpRequest(true);
     else restart();
   };
 
@@ -343,7 +362,8 @@ export default function App() {
             </button>
           )}
           {snapshot.canSwitch &&
-            (snapshot.state === "warm-up" || snapshot.state === "ready") && (
+            (snapshot.state === "warm-up" || snapshot.state === "ready") &&
+            snapshot.reason !== "switch-failed" && (
               <button
                 className="secondary-action"
                 type="button"
@@ -358,7 +378,11 @@ export default function App() {
               summary.
             </p>
           )}
-          <SystemStatus snapshot={snapshot} />
+          <SystemStatus
+            openRequest={helpRequest}
+            onOpenRequestHandled={() => setHelpRequest(false)}
+            snapshot={snapshot}
+          />
         </section>
       </main>
       <footer className="site-footer">
