@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — Verify a sustained Smile Score; 06 — Enforce lighting Quality Gates.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] Five seconds of valid Verification transitions once into COUNTDOWN with no duplicate start.
 - [ ] The Countdown uses monotonic deadlines and displays large, deterministic remaining values.

@@ -4,7 +4,7 @@
 
 **Blocked by:** 09 — Select the best Capture Candidate.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] The canonical state reducer implements the approved states, transition reasons, and event-priority order.
 - [ ] Reset advances the session generation, clears Participant continuity and timers, cancels Countdown/burst work, and returns safely to READY.

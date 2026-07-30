@@ -4,7 +4,7 @@
 
 **Blocked by:** 11 — Make operation configurable and diagnosable; 12 — Finish the Participant and debug overlays.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] The highest automated seam drives timestamped camera/vision events, clock, worker/storage outcomes, and controls while observing state, guidance, telemetry, and committed Final Photos.
 - [ ] Versioned Validation Fixtures cover smile, Face Continuity, face count/position/size, lighting, blur, candidate ranking, cancellation, retry, and fault scenarios.

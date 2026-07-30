@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — Maintain anonymous Face Continuity.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] Smile Score combines left/right mouth-smile evidence with the approved bilateral formula and treats missing/invalid evidence as non-smiling.
 - [ ] EMA alpha 0.35, high threshold 0.60, low threshold 0.45, validated ranges, and the minimum hysteresis gap are enforced.

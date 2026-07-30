@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Show a live MacBook camera preview.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] MediaPipe Face Landmarker runs in the inference lane on aspect-preserving, non-upscaled frames capped at a 640-pixel long edge.
 - [ ] Immutable frame/result envelopes carry generation, sequence number, and monotonic capture timestamp through the single-slot latest-frame mailbox.

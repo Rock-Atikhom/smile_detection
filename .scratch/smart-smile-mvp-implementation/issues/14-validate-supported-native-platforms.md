@@ -4,7 +4,7 @@
 
 **Blocked by:** 13 — Generate a reproducible Acceptance Report.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] On this Apple-Silicon MacBook, a clean environment installs from the approved lock, verifies the model, obtains camera permission, opens the built-in camera through AVFoundation, and completes live Capture Sessions.
 - [ ] The macOS run exercises normal/dim/backlit scenes, no face, multiple faces, brief/prolonged interruption, Participant replacement, natural/weak smiles, Countdown cancellation, invalid burst retry, debug toggle, reset, and clean exit.

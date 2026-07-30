@@ -4,7 +4,7 @@
 
 **Blocked by:** 07 — Run a cancel-safe Countdown.
 
-**Status:** ready-for-agent
+**Status:** paused — superseded by Smart Smile PWA planning pending approval
 
 - [ ] Countdown zero starts a five-frame, full-resolution Capture Burst lasting 250–300 ms with no normal-frame replacement inside the bounded burst buffer.
 - [ ] Burst processing and storage run off the UI lane while PROCESSING remains responsive.
