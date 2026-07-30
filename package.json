@@ -11,8 +11,12 @@
   },
   "scripts": {
     "web:dev": "npm run dev --workspace=@smart-smile/web",
+    "web:format:check": "npm run format:check --workspace=@smart-smile/web",
+    "web:lint": "npm run lint --workspace=@smart-smile/web",
     "web:test": "npm run test --workspace=@smart-smile/web",
     "web:typecheck": "npm run typecheck --workspace=@smart-smile/web",
-    "web:build": "npm run build --workspace=@smart-smile/web"
+    "web:e2e": "npm run test:e2e --workspace=@smart-smile/web",
+    "web:build": "npm run build --workspace=@smart-smile/web",
+    "web:preview": "npm run preview --workspace=@smart-smile/web"
   }
 }

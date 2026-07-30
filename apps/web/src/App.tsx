@@ -4,7 +4,11 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="site-header">
-        <a className="wordmark" href="#main-content" aria-label="Smart Smile home">
+        <a
+          className="wordmark"
+          href="#main-content"
+          aria-label="Smart Smile home"
+        >
           Smart Smile
         </a>
         <div className="header-actions">
@@ -18,7 +22,8 @@ export default function App() {
               <Dialog.Content className="privacy-dialog">
                 <Dialog.Title>How privacy works</Dialog.Title>
                 <Dialog.Description>
-                  Smart Smile is designed to keep this experience on your device.
+                  Smart Smile is designed to keep this experience on your
+                  device.
                 </Dialog.Description>
                 <ul>
                   <li>No account is required.</li>
@@ -36,7 +41,10 @@ export default function App() {
       </header>
 
       <main className="foundation-layout" id="main-content">
-        <section className="camera-stage" aria-label="Camera foundation preview">
+        <section
+          className="camera-stage"
+          aria-label="Camera foundation preview"
+        >
           <div className="camera-stage__placeholder" aria-hidden="true">
             <span>Camera preview</span>
             <small>Available in the next delivery step</small>
@@ -47,8 +55,8 @@ export default function App() {
           <p className="eyebrow">Private by design</p>
           <h1 id="privacy-heading">Take a smile photo privately</h1>
           <p>
-            Camera and smile detection run on this device. No camera image or photo is
-            uploaded.
+            Camera and smile detection run on this device. No camera image or
+            photo is uploaded.
           </p>
           <button
             className="primary-action"

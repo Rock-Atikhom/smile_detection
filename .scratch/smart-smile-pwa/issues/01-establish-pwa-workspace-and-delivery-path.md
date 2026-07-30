@@ -62,13 +62,18 @@ Camera permission, MediaPipe, offline model caching, or photo capture.
 
 ## Task 3 — Add reproducible quality and delivery gates
 
-- Add pinned web dependencies, formatting, lint, type-check, unit/component test, Playwright smoke, and production build commands.
-- Extend GitHub CI without weakening the preserved Python checks.
-- Add Cloudflare Pages static configuration and the initial restrictive headers policy.
-- Document Web, Local, Mobile, development, production-preview, Python-reference, and deployment commands.
+- Pin ESLint 10.8.0, @eslint/js 10.0.1, typescript-eslint 8.65.0, globals 17.8.0, eslint-plugin-react-hooks 7.1.1, eslint-plugin-react-refresh 0.5.3, Prettier 3.9.6, and @playwright/test 1.62.0 without version ranges.
+- Add root and web commands for development, formatting check, lint, type-check, unit/component tests, Playwright browser tests, production build, and locally serving the production build.
+- Add an ESLint flat configuration, Prettier configuration, and Playwright configuration. Browser tests must exercise the real built shell at 390x844, 844x390, 768x1024, and 1440x900; assert the semantic privacy shell, disabled camera action, absence of video, and no horizontal page overflow; attach a screenshot for each viewport.
+- Extend GitHub CI with a Node 22 web job using npm ci and all web gates. Preserve the existing Python job and its exact checks.
+- Add apps/web/public/_headers so Cloudflare Pages applies: a self-only default/script/style/connect policy, no objects, self base/form, no framing, camera self only, microphone disabled, no referrer, nosniff, and HTTPS upgrade. Keep the policy compatible with later self-hosted workers/WASM by documenting that ticket 03 will add only the minimum verified directives it requires.
+- Add docs/deployment/cloudflare-pages.md with the private GitHub repository connection, root npm build command, apps/web/dist output, Node 22 setting, preview-deployment behavior, production branch, and post-deploy header check. Do not claim a preview URL until the external Cloudflare project is actually connected.
+- Expand the root README with the formal Web, Local, and Mobile definitions plus exact development, local production, validation, Python-reference, and Cloudflare setup commands.
+- Verify the production build contains _headers and no camera, MediaPipe, service-worker, photo, or analytics code.
 
 ## Task 4 — Verify and close ticket 01
 
-- Run the complete Python and web validation commands from a clean dependency state.
-- Verify responsive artifacts, security headers, and that no ticket-02 camera functionality was added.
-- Update this ticket with completion evidence and mark it completed only when every acceptance criterion has evidence.
+- Remove dependency/build caches in a targeted, recoverable way only when required, then run npm ci and the complete Python/web validation commands from the repository root.
+- Verify the four responsive Playwright artifacts, built _headers, exact dependency pins, production bundle, and the absence of ticket-02 camera, MediaPipe, service-worker, photo, persistence, and analytics behavior.
+- Check whether a Cloudflare credential/project is available without exposing secret values. If unavailable, record the external preview as the only human-owned acceptance item and do not falsely mark it complete.
+- Update the ticket checklist and completion evidence. Mark the ticket completed only if every acceptance criterion, including an actual Cloudflare preview, has evidence; otherwise mark it in-progress with the exact remaining human action.

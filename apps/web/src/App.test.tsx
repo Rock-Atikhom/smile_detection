@@ -39,10 +39,14 @@ describe("Smart Smile foundation shell", () => {
       screen.getByText("Camera setup is the next delivery step."),
     ).toBeVisible();
 
-    const privacyTrigger = screen.getByRole("button", { name: "How privacy works" });
+    const privacyTrigger = screen.getByRole("button", {
+      name: "How privacy works",
+    });
     expect(privacyTrigger).toBeEnabled();
     fireEvent.click(privacyTrigger);
-    expect(screen.getByRole("dialog", { name: "How privacy works" })).toBeVisible();
+    expect(
+      screen.getByRole("dialog", { name: "How privacy works" }),
+    ).toBeVisible();
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
@@ -51,9 +55,13 @@ describe("Smart Smile foundation shell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "How privacy works" }));
 
-    expect(screen.getByRole("dialog", { name: "How privacy works" })).toBeVisible();
+    expect(
+      screen.getByRole("dialog", { name: "How privacy works" }),
+    ).toBeVisible();
     expect(screen.getByText("No account is required.")).toBeVisible();
-    expect(screen.getByText("No camera image or photo is uploaded.")).toBeVisible();
+    expect(
+      screen.getByText("No camera image or photo is uploaded."),
+    ).toBeVisible();
     expect(screen.getByText("Microphone access is not used.")).toBeVisible();
     expect(
       screen.getByText("The application does not persist photos."),
