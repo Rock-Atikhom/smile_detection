@@ -134,3 +134,9 @@ The second phone review still could not change cameras. Mobile switching now exp
 releases the active track before requesting the replacement because the phone browser
 does not permit concurrent ownership. Desktop switching retains candidate-first
 validation. No further UX/UI changes are included until real-phone switching passes.
+
+The third phone review showed that switching required two presses. iPhone exposes
+multiple physical camera IDs, and cycling those IDs could select another lens on the
+same side before reaching the opposite camera. Mobile now ignores physical-device
+cycling and performs one semantic facing-mode toggle per action: user to environment,
+then environment to user. UX/UI remains unchanged in this correction.

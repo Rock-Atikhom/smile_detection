@@ -176,10 +176,11 @@ export class CameraSession {
     const oldSnapshot = this.snapshotValue;
     const oldStream = this.activeStream;
     const oldTrack = this.activeTrack;
+    const mobile = this.deps.isMobile();
     const currentDeviceId = oldTrack?.getSettings().deviceId;
     const currentIndex = this.deviceIds.indexOf(currentDeviceId ?? "");
     const nextIndex =
-      this.deviceIds.length > 1
+      !mobile && this.deviceIds.length > 1
         ? (currentIndex >= 0 ? currentIndex + 1 : this.deviceIndex + 1) %
           this.deviceIds.length
         : -1;
@@ -187,9 +188,9 @@ export class CameraSession {
     const currentFacing =
       oldTrack?.getSettings().facingMode ??
       this.lastFacingMode ??
-      (this.deps.isMobile() ? "user" : undefined);
+      (mobile ? "user" : undefined);
     const alternateFacing = currentFacing === "user" ? "environment" : "user";
-    const releaseBeforeRequest = this.deps.isMobile();
+    const releaseBeforeRequest = mobile;
     this.switchingFromStream = oldStream;
     if (releaseBeforeRequest) {
       stopTracks(oldStream);

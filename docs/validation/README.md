@@ -7,7 +7,8 @@ contained preview, intentional stop, responsive control reachability at 390x844,
 1440x900, and 200/400 percent reflow equivalents. It also verifies the mobile system-status sheet,
 desktop drawer, first-viewport mobile camera controls, limited-enumeration facing-mode switching,
 mobile release-before-request ordering and failure recovery, no post-load application requests,
-and empty IndexedDB, local/session storage, Cache
+one-action front/rear facing-mode toggling without physical-device cycling, no post-load
+application requests, and empty IndexedDB, local/session storage, Cache
 Storage, service-worker registrations, and script-visible cookies. The Python reference retains its
 locked 38-test, Ruff, and strict mypy gates.
 

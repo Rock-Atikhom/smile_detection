@@ -278,6 +278,59 @@ describe("camera session lifecycle", () => {
     });
   });
 
+  it("toggles mobile facing mode in one action instead of cycling physical device IDs", async () => {
+    const frontTrack = makeTrack({ deviceId: "front-a", facingMode: "user" });
+    const rearTrack = makeTrack({
+      deviceId: "rear-wide",
+      facingMode: "environment",
+    });
+    const returnedFrontTrack = makeTrack({
+      deviceId: "front-a",
+      facingMode: "user",
+    });
+    const { getUserMedia, session } = createHarness({
+      enumerateDevices: () =>
+        Promise.resolve([
+          { deviceId: "front-a", kind: "videoinput" },
+          { deviceId: "front-depth", kind: "videoinput" },
+          { deviceId: "rear-wide", kind: "videoinput" },
+        ] as MediaDeviceInfo[]),
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(frontTrack))
+        .mockResolvedValueOnce(makeStream(rearTrack))
+        .mockResolvedValueOnce(makeStream(returnedFrontTrack)),
+      mobile: true,
+    });
+
+    await session.start();
+    await vi.waitFor(() => expect(session.snapshot.canSwitch).toBe(true));
+    await session.switchCamera();
+    await session.switchCamera();
+
+    expect(
+      getUserMedia.mock.calls
+        .slice(1)
+        .map(
+          ([constraints]) =>
+            (constraints.video as MediaTrackConstraints).facingMode,
+        ),
+    ).toEqual([{ exact: "environment" }, { exact: "user" }]);
+    expect(
+      getUserMedia.mock.calls
+        .slice(1)
+        .map(
+          ([constraints]) =>
+            (constraints.video as MediaTrackConstraints).deviceId,
+        ),
+    ).toEqual([undefined, undefined]);
+    expect(session.snapshot).toMatchObject({
+      facingMode: "user",
+      generation: 3,
+      state: "warm-up",
+    });
+  });
+
   it("invalidates the public generation immediately when an active track ends", async () => {
     vi.useFakeTimers();
     const firstTrack = makeTrack();

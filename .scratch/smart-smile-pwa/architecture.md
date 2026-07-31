@@ -281,6 +281,8 @@ Camera switch algorithm:
 On mobile, the facing-mode control remains available when device enumeration exposes
 only the active camera. Mobile switching releases the active track before requesting
 the replacement because some phone browsers cannot grant concurrent camera ownership.
+It toggles `facingMode` directly between `user` and `environment` rather than cycling
+physical device IDs, because a phone can expose several lenses for the same direction.
 Desktop switching retains candidate-first validation. If a released mobile replacement
 fails, the session publishes interruption recovery and never claims that the ended
 preview remains active.
