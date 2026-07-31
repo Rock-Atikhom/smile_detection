@@ -34,6 +34,9 @@ jobs:
       - name: Install locked web dependencies
         run: npm ci
 
+      - name: Verify vendored vision release
+        run: npm run web:vision:check
+
       - name: Check web formatting
         run: npm run web:format:check
 

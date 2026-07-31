@@ -1,0 +1,140 @@
+{
+  "assets": [
+    {
+      "bytes": 12331,
+      "id": "license",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "requiredForOffline": true,
+      "role": "license",
+      "sha256": "8707eef0533987efc5b155d64761eeb6e20793f50b9bd1a68dad1cf4719d0ed8",
+      "source": "https://raw.githubusercontent.com/google-ai-edge/mediapipe/v0.10.35/LICENSE",
+      "version": "0.10.35"
+    },
+    {
+      "bytes": 903,
+      "id": "notice",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/NOTICE.txt",
+      "requiredForOffline": true,
+      "role": "notice",
+      "sha256": "fb05007d63ce970b042c584c0c653d355b9f7322a987fca050cf452d3efd7afa",
+      "source": "https://github.com/google-ai-edge/mediapipe/tree/v0.10.35",
+      "version": "0.10.35"
+    },
+    {
+      "bytes": 3758596,
+      "id": "face-landmarker-model",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/face_landmarker.task",
+      "requiredForOffline": true,
+      "role": "face-landmarker-model",
+      "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+      "source": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      "version": "float16/1"
+    },
+    {
+      "bytes": 434425,
+      "id": "model-card-face-detector",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/model-card-blazeface-short-range.pdf",
+      "requiredForOffline": true,
+      "role": "model-card-face-detector",
+      "sha256": "cd335c06fc0de7807cd815a0777a697932598bcdb28fa98adaaabf847485f758",
+      "source": "https://storage.googleapis.com/mediapipe-assets/MediaPipe%20BlazeFace%20Model%20Card%20%28Short%20Range%29.pdf",
+      "version": "0.10.35"
+    },
+    {
+      "bytes": 2324099,
+      "id": "model-card-blendshape",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/model-card-blendshape-v2.pdf",
+      "requiredForOffline": true,
+      "role": "model-card-blendshape",
+      "sha256": "c8e9cf60a39998f4b341740623917590e050d1c97004e2de4568d84e026445ae",
+      "source": "https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Blendshape%20V2.pdf",
+      "version": "0.10.35"
+    },
+    {
+      "bytes": 3476420,
+      "id": "model-card-face-mesh",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/model-card-face-mesh-v2.pdf",
+      "requiredForOffline": true,
+      "role": "model-card-face-mesh",
+      "sha256": "c6add060f4ebfb37b2690136b6c711c7e5fcb7038baa2649ae3338b83979565a",
+      "source": "https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf",
+      "version": "0.10.35"
+    },
+    {
+      "bytes": 322044,
+      "id": "wasm-loader-simd",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/vision_wasm_internal.js",
+      "requiredForOffline": true,
+      "role": "wasm-loader-simd",
+      "sha256": "e7fd9858e8e8f221d9b96eddc11f8e077f263e0b7bbd79d3cbe882b134274f8c",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.35.tgz",
+      "version": "0.10.35"
+    },
+    {
+      "bytes": 11153617,
+      "id": "wasm-binary-simd",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/vision_wasm_internal.wasm",
+      "requiredForOffline": true,
+      "role": "wasm-binary-simd",
+      "sha256": "6a5c64584c2ab61c763b6e204afbdbc7ce1caf7f5216187322bca8df94f646bc",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.35.tgz",
+      "version": "0.10.35"
+    },
+    {
+      "bytes": 322082,
+      "id": "wasm-loader-module-simd",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/vision_wasm_module_internal.js",
+      "requiredForOffline": true,
+      "role": "wasm-loader-module-simd",
+      "sha256": "1f1d6215324a1fe62f6742d49a3db911170987ca18ad8c1b75f1a1c82acf2b44",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.35.tgz",
+      "version": "0.10.35"
+    },
+    {
+      "bytes": 11153641,
+      "id": "wasm-binary-module-simd",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/vision_wasm_module_internal.wasm",
+      "requiredForOffline": true,
+      "role": "wasm-binary-module-simd",
+      "sha256": "617b8e0248dbd27e9d7ece4218004eae4cefb499196d1bb4fa0e3fef21708756",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.35.tgz",
+      "version": "0.10.35"
+    },
+    {
+      "bytes": 321847,
+      "id": "wasm-loader-baseline",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/vision_wasm_nosimd_internal.js",
+      "requiredForOffline": true,
+      "role": "wasm-loader-baseline",
+      "sha256": "438d1fe8ff7f4d946025bc211c291543c037d8a3785ed4eee60f1f521b236296",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.35.tgz",
+      "version": "0.10.35"
+    },
+    {
+      "bytes": 10481398,
+      "id": "wasm-binary-baseline",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/vision_wasm_nosimd_internal.wasm",
+      "requiredForOffline": true,
+      "role": "wasm-binary-baseline",
+      "sha256": "8a3092d34c79d3f57e6ba8592105e8a90f6b07c27891ffecd14cca428bfd3e31",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.35.tgz",
+      "version": "0.10.35"
+    }
+  ],
+  "modelVersion": "float16/1",
+  "runtimeVersion": "0.10.35",
+  "schemaVersion": 1,
+  "releaseId": "6c23e451b7a9b523"
+}
