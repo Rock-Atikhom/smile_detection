@@ -22,8 +22,11 @@ const contentTypes = new Map([
   [".html", "text/html; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
+  [".pdf", "application/pdf"],
   [".png", "image/png"],
   [".svg", "image/svg+xml"],
+  [".task", "application/octet-stream"],
+  [".wasm", "application/wasm"],
 ]);
 
 const server = createServer((request, response) => {

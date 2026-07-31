@@ -29,6 +29,10 @@ const contractsPackage = JSON.parse(
   ),
 ) as Record<string, unknown>;
 
+const builtServiceWorker = existsSync(new URL("../dist/sw.js", import.meta.url))
+  ? readFileSync(new URL("../dist/sw.js", import.meta.url), "utf8")
+  : "";
+
 function parseHeaders(input: string) {
   const result = new Map<string, string>();
   for (const line of input.split("\n").slice(1)) {
@@ -67,15 +71,19 @@ test("keeps the required restrictive Cloudflare Pages security headers", () => {
 
   expect([...csp]).toEqual([
     ["default-src", ["'self'"]],
-    ["script-src", ["'self'"]],
+    ["script-src", ["'self'", "'wasm-unsafe-eval'"]],
     ["style-src", ["'self'"]],
     ["connect-src", ["'self'"]],
+    ["worker-src", ["'self'"]],
     ["object-src", ["'none'"]],
     ["base-uri", ["'self'"]],
     ["form-action", ["'self'"]],
     ["frame-ancestors", ["'none'"]],
     ["upgrade-insecure-requests", []],
   ]);
+  expect(csp.get("script-src")).not.toContain("'unsafe-eval'");
+  expect(csp.get("worker-src")).not.toContain("blob:");
+  expect(csp.get("worker-src")).not.toContain("data:");
   expect(headers.get("Permissions-Policy")).toBe(
     "camera=(self), microphone=()",
   );
@@ -83,6 +91,22 @@ test("keeps the required restrictive Cloudflare Pages security headers", () => {
   expect(headers.get("X-Content-Type-Options")).toBe("nosniff");
   expect(headers.get("Strict-Transport-Security")).toBe(
     "max-age=31536000; includeSubDomains; preload",
+  );
+});
+
+test("precaches the hashed application manifest but not vision release files", () => {
+  const precacheUrls = [
+    ...builtServiceWorker.matchAll(/["']url["']:\s*["']([^"']+)["']/g),
+  ].map((match) => match[1]!);
+
+  expect(precacheUrls).toContainEqual(
+    expect.stringMatching(/^assets\/release-manifest-[\w-]+\.json$/),
+  );
+  expect(precacheUrls).not.toContainEqual(expect.stringMatching(/\.wasm$/));
+  expect(precacheUrls).not.toContainEqual(expect.stringMatching(/\.task$/));
+  expect(precacheUrls).not.toContainEqual(expect.stringMatching(/\.pdf$/));
+  expect(precacheUrls).not.toContainEqual(
+    expect.stringMatching(/^vision\/.*\.js$/),
   );
 });
 
