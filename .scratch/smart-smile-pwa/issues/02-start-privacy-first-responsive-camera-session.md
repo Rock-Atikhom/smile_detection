@@ -31,7 +31,8 @@ A participant understands the privacy boundary, grants camera permission through
 - [x] Fake-media contract tests for error mapping and generations.
 - [x] Component/a11y tests for privacy, permission, warm-up, and recovery states.
 - [x] Playwright synthetic-camera preview in Chromium.
-- [ ] Manual preview review on this MacBook and one phone before completion.
+- [x] Manual preview review on this MacBook (passed 2026-07-31).
+- [ ] Manual preview review on one phone before completion.
 - [x] Network assertion that camera sessions emit no application data.
 
 ## Blocked by
