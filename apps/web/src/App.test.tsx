@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CAMERA_ATTACHMENT_TIMEOUT_MS,
@@ -210,7 +216,7 @@ describe("Smart Smile camera session", () => {
     fireEvent.loadedData(video);
     await vi.advanceTimersByTimeAsync(0);
     expect(vi.getTimerCount()).toBe(1);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop camera" }));
 
     expect(track.stop).toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
@@ -289,13 +295,13 @@ describe("Smart Smile camera session", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Your current camera is still active",
+        name: "Could not switch cameras",
       }),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Switch camera" })).toBeEnabled();
     expect(screen.getByLabelText("Live camera preview")).toBeVisible();
     expect(screen.getByLabelText("Camera status")).toHaveTextContent(
-      "Camera status: Your current camera is still active.",
+      "Camera status: Could not switch cameras.",
     );
     expect(screen.getByLabelText("Camera status")).toHaveAttribute(
       "aria-atomic",
@@ -405,5 +411,72 @@ describe("Smart Smile camera session", () => {
       screen.getByRole("button", { name: "Close system status" }),
     );
     expect(trigger).toHaveFocus();
+  });
+
+  it("renders an active semantic overlay and blocks duplicate switching without hiding Stop", async () => {
+    const first = makeStream();
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValueOnce(first.stream)
+      .mockImplementationOnce(() => new Promise<MediaStream>(() => undefined));
+    installCamera(getUserMedia, [
+      {
+        deviceId: "first-camera",
+        groupId: "camera-group",
+        kind: "videoinput",
+        label: "",
+      },
+      {
+        deviceId: "second-camera",
+        groupId: "camera-group",
+        kind: "videoinput",
+        label: "",
+      },
+    ] as MediaDeviceInfo[]);
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+    const video = await screen.findByLabelText("Live camera preview");
+    fireEvent.loadedData(video);
+
+    const overlay = await screen.findByRole("region", {
+      name: "Live camera controls",
+    });
+    expect(within(overlay).getByRole("status")).toHaveTextContent(
+      "Getting ready",
+    );
+    expect(screen.queryByText("Private by design")).not.toBeInTheDocument();
+
+    const help = within(overlay).getByRole("button", {
+      name: "Help & system status",
+    });
+    const stop = within(overlay).getByRole("button", { name: "Stop camera" });
+    const switchButton = within(overlay).getByRole("button", {
+      name: "Switch camera",
+    });
+    expect(
+      help.compareDocumentPosition(stop) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      stop.compareDocumentPosition(switchButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    fireEvent.click(help);
+    expect(
+      screen.getByRole("dialog", { name: "Help & system status" }),
+    ).toHaveTextContent("Generation1");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close system status" }),
+    );
+    expect(help).toHaveFocus();
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(switchButton);
+
+    expect(stop).toBeEnabled();
+    expect(switchButton).toBeDisabled();
+    expect(switchButton).toHaveAttribute("aria-busy", "true");
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
   });
 });

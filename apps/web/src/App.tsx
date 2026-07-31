@@ -64,7 +64,7 @@ const errorCopy: Record<CameraRecoveryReason, Copy> = {
   },
   "switch-failed": {
     action: "Switch camera",
-    heading: "Your current camera is still active",
+    heading: "Could not switch cameras",
     text: "The other camera could not start. You can keep using this preview or try switching again.",
   },
   "unsupported-camera-api": {
@@ -169,10 +169,12 @@ function SystemStatus({
   openRequest,
   onOpenRequestHandled,
   snapshot,
+  variant = "default",
 }: {
   openRequest: boolean;
   onOpenRequestHandled: () => void;
   snapshot: CameraSnapshot;
+  variant?: "default" | "overlay";
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -193,11 +195,20 @@ function SystemStatus({
       onOpenChange={setEffectiveOpen}
     >
       <Dialog.Trigger
-        className="secondary-action system-status-trigger"
+        className={`secondary-action system-status-trigger${
+          variant === "overlay" ? " system-status-trigger--overlay" : ""
+        }`}
         ref={triggerRef}
         type="button"
       >
-        Help &amp; system status
+        {variant === "overlay" && (
+          <span aria-hidden="true" className="system-status-trigger__icon">
+            ?
+          </span>
+        )}
+        <span className={variant === "overlay" ? "visually-hidden" : undefined}>
+          Help &amp; system status
+        </span>
       </Dialog.Trigger>
       <NativeDialog
         closeLabel="Close system status"
@@ -307,6 +318,19 @@ export default function App() {
     snapshot.state === "ready" ||
     snapshot.reason === "switch-failed";
   const recovery = snapshot.state === "recoverable-error";
+  const sessionOverlayVisible =
+    snapshot.state === "camera-starting" ||
+    snapshot.state === "camera-switching" ||
+    snapshot.state === "warm-up" ||
+    snapshot.state === "ready" ||
+    snapshot.reason === "switch-failed";
+  const switchBusy = snapshot.state === "camera-switching";
+  const switchVisible =
+    (snapshot.canSwitch || snapshot.reason === "switch-failed") &&
+    (snapshot.state === "camera-switching" ||
+      snapshot.state === "warm-up" ||
+      snapshot.state === "ready" ||
+      snapshot.reason === "switch-failed");
   const showSwitch =
     snapshot.canSwitch &&
     (snapshot.state === "warm-up" || snapshot.state === "ready") &&
@@ -351,22 +375,38 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
-      <header className="site-header">
-        <a
-          className="wordmark"
-          href="#main-content"
-          aria-label="Smart Smile home"
+    <div
+      className={`app-shell${
+        sessionOverlayVisible ? " app-shell--camera-active" : ""
+      }`}
+    >
+      {!sessionOverlayVisible && (
+        <header className="site-header">
+          <a
+            aria-label="Smart Smile home"
+            className="wordmark"
+            href="#main-content"
+          >
+            Smart Smile
+          </a>
+          <div className="header-actions">
+            <span className="privacy-status">On-device</span>
+            <PrivacyDisclosure />
+          </div>
+        </header>
+      )}
+      <main
+        className={`foundation-layout${
+          sessionOverlayVisible ? " foundation-layout--camera-active" : ""
+        }`}
+        id="main-content"
+      >
+        <section
+          aria-label="Camera preview"
+          className={`camera-stage${
+            sessionOverlayVisible ? " camera-stage--session" : ""
+          }`}
         >
-          Smart Smile
-        </a>
-        <div className="header-actions">
-          <span className="privacy-status">On-device</span>
-          <PrivacyDisclosure />
-        </div>
-      </header>
-      <main className="foundation-layout" id="main-content">
-        <section className="camera-stage" aria-label="Camera preview">
           {active ? (
             <>
               <video
@@ -378,6 +418,74 @@ export default function App() {
                 ref={videoRef}
               />
               <div aria-hidden="true" className="capture-zone" />
+              {sessionOverlayVisible && (
+                <section
+                  aria-label="Live camera controls"
+                  className="camera-session-overlay"
+                >
+                  <header className="session-chrome__top">
+                    <span className="wordmark wordmark--overlay">
+                      Smart Smile
+                    </span>
+                    <SystemStatus
+                      openRequest={helpRequest}
+                      onOpenRequestHandled={() => setHelpRequest(false)}
+                      snapshot={snapshot}
+                      variant="overlay"
+                    />
+                  </header>
+                  <div className="session-chrome__bottom">
+                    <div
+                      aria-atomic="true"
+                      aria-label="Camera status"
+                      aria-live="polite"
+                      className="session-status"
+                      role="status"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="session-status__dot"
+                      />
+                      <h1
+                        id="camera-heading"
+                        ref={recoveryHeadingRef}
+                        tabIndex={-1}
+                      >
+                        {copy.heading}
+                      </h1>
+                      <p className="visually-hidden">{liveStatus}</p>
+                    </div>
+                    <p className="visually-hidden">{copy.text}</p>
+                    <div className="session-controls">
+                      <button
+                        className="session-control session-control--stop"
+                        onClick={stop}
+                        type="button"
+                      >
+                        <span aria-hidden="true">■</span>
+                        Stop camera
+                      </button>
+                      {switchVisible && (
+                        <button
+                          aria-busy={switchBusy || undefined}
+                          className="session-control session-control--switch"
+                          disabled={switchBusy}
+                          onClick={switchCamera}
+                          ref={
+                            snapshot.reason === "switch-failed"
+                              ? primaryActionRef
+                              : undefined
+                          }
+                          type="button"
+                        >
+                          <span aria-hidden="true">↻</span>
+                          Switch camera
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              )}
             </>
           ) : (
             <div className="camera-stage__placeholder" aria-hidden="true">
@@ -386,62 +494,66 @@ export default function App() {
             </div>
           )}
         </section>
-        <section className="coach-card" aria-labelledby="camera-heading">
-          <p className="eyebrow">Private by design</p>
-          <h1 id="camera-heading" ref={recoveryHeadingRef} tabIndex={-1}>
-            {copy.heading}
-          </h1>
-          <p>{copy.text}</p>
-          <p
-            aria-label="Camera status"
-            aria-atomic="true"
-            aria-live="polite"
-            className="camera-status"
-            id="camera-status"
-          >
-            {liveStatus}
-          </p>
-          {(copy.action || showSwitch) && (
-            <div
-              className={`camera-actions${copy.action && showSwitch ? " camera-actions--split" : ""}`}
+        {!sessionOverlayVisible && (
+          <section className="coach-card" aria-labelledby="camera-heading">
+            <p className="eyebrow">Private by design</p>
+            <h1 id="camera-heading" ref={recoveryHeadingRef} tabIndex={-1}>
+              {copy.heading}
+            </h1>
+            <p>{copy.text}</p>
+            <p
+              aria-label="Camera status"
+              aria-atomic="true"
+              aria-live="polite"
+              className="camera-status"
+              id="camera-status"
             >
-              {copy.action && (
-                <button
-                  className="primary-action"
-                  type="button"
-                  onClick={runAction}
-                  ref={primaryActionRef}
-                >
-                  {copy.action}
-                </button>
-              )}
-              {showSwitch && (
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={switchCamera}
-                >
-                  Switch camera
-                </button>
-              )}
-            </div>
-          )}
-          {recovery && (
-            <p className="next-step">
-              You can open Help &amp; system status for a read-only session
-              summary.
+              {liveStatus}
             </p>
-          )}
-          <SystemStatus
-            openRequest={helpRequest}
-            onOpenRequestHandled={() => setHelpRequest(false)}
-            snapshot={snapshot}
-          />
-        </section>
+            {(copy.action || showSwitch) && (
+              <div
+                className={`camera-actions${copy.action && showSwitch ? " camera-actions--split" : ""}`}
+              >
+                {copy.action && (
+                  <button
+                    className="primary-action"
+                    type="button"
+                    onClick={runAction}
+                    ref={primaryActionRef}
+                  >
+                    {copy.action}
+                  </button>
+                )}
+                {showSwitch && (
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={switchCamera}
+                  >
+                    Switch camera
+                  </button>
+                )}
+              </div>
+            )}
+            {recovery && (
+              <p className="next-step">
+                You can open Help &amp; system status for a read-only session
+                summary.
+              </p>
+            )}
+            <SystemStatus
+              openRequest={helpRequest}
+              onOpenRequestHandled={() => setHelpRequest(false)}
+              snapshot={snapshot}
+            />
+          </section>
+        )}
       </main>
-      <footer className="site-footer">
-        <span>Smart Smile camera preview</span>
-      </footer>
+      {!sessionOverlayVisible && (
+        <footer className="site-footer">
+          <span>Smart Smile camera preview</span>
+        </footer>
+      )}
     </div>
   );
 }
