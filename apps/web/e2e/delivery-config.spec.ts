@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { matchesGlob } from "node:path";
 import { expect, test } from "@playwright/test";
 
 const sourceHeaders = readFileSync(
@@ -32,6 +33,13 @@ const contractsPackage = JSON.parse(
 const builtServiceWorker = existsSync(new URL("../dist/sw.js", import.meta.url))
   ? readFileSync(new URL("../dist/sw.js", import.meta.url), "utf8")
   : "";
+const viteConfig = readFileSync(
+  new URL("../vite.config.ts", import.meta.url),
+  "utf8",
+);
+const configuredVisionPrecacheIgnores = [
+  ...viteConfig.matchAll(/["'](vision\/\*\*\/\*[^"']*)["']/g),
+].map((match) => match[1]!);
 
 function parseHeaders(input: string) {
   const result = new Map<string, string>();
@@ -105,9 +113,21 @@ test("precaches the hashed application manifest but not vision release files", (
   expect(precacheUrls).not.toContainEqual(expect.stringMatching(/\.wasm$/));
   expect(precacheUrls).not.toContainEqual(expect.stringMatching(/\.task$/));
   expect(precacheUrls).not.toContainEqual(expect.stringMatching(/\.pdf$/));
-  expect(precacheUrls).not.toContainEqual(
-    expect.stringMatching(/^vision\/.*\.js$/),
-  );
+  expect(precacheUrls).not.toContainEqual(expect.stringMatching(/^vision\//));
+});
+
+test("keeps future vision images outside the shell precache policy", () => {
+  for (const path of [
+    "vision/preview.png",
+    "vision/diagram.svg",
+    "vision/favicon.ico",
+  ]) {
+    expect(
+      configuredVisionPrecacheIgnores.some((pattern) =>
+        matchesGlob(path, pattern),
+      ),
+    ).toBe(true);
+  }
 });
 
 test("pins the supported Node and npm toolchain", () => {

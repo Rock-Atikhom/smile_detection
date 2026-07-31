@@ -14,6 +14,7 @@ export default defineConfig({
       injectManifest: {
         globPatterns: ["**/*.{html,css,js,json,png,svg,ico}"],
         globIgnores: [
+          "vision/**/*",
           "vision/**/*.js",
           "vision/**/*.wasm",
           "vision/**/*.task",
