@@ -193,7 +193,7 @@ function SystemStatus({
     setOpen(nextOpen);
   };
   const cameraStatusLabel =
-    cameraSnapshot.state === "ready" || cameraSnapshot.state === "warm-up"
+    cameraSnapshot.state === "ready"
       ? "Ready"
       : cameraSnapshot.state === "recoverable-error"
         ? "Needs attention"
@@ -383,7 +383,8 @@ function combinedCopy(
   }
   if (
     preflighting ||
-    (runtimeSnapshot.runtime === "preparing" &&
+    ((runtimeSnapshot.runtime === "idle" ||
+      runtimeSnapshot.runtime === "preparing") &&
       (cameraSnapshot.state === "camera-starting" ||
         cameraSnapshot.state === "warm-up" ||
         cameraSnapshot.state === "ready"))
@@ -407,14 +408,15 @@ export default function App() {
   const [preflighting, setPreflighting] = useState(false);
   const [firstUseOffline, setFirstUseOffline] = useState(false);
   const [offlineAnnouncement, setOfflineAnnouncement] = useState("");
-  const [offlineAnnouncementContext, setOfflineAnnouncementContext] =
-    useState("");
   const [cameraStartRequest, setCameraStartRequest] = useState<
     "start" | "restart" | null
   >(null);
   const actionGenerationRef = useRef(0);
   const consumedCameraStartRef = useRef<"start" | "restart" | null>(null);
+  const fatalIntegrityRef = useRef(false);
+  const previousFatalIntegrityRef = useRef(false);
   const previousOfflineStateRef = useRef(vision.snapshot.offlineCache);
+  const previousPriorityStatusRef = useRef(false);
   const primaryActionRef = useRef<HTMLButtonElement>(null);
   const recoveryHeadingRef = useRef<HTMLHeadingElement>(null);
   const copy = combinedCopy(
@@ -453,25 +455,52 @@ export default function App() {
     snapshot.canSwitch &&
     (snapshot.state === "warm-up" || snapshot.state === "ready") &&
     snapshot.reason !== "switch-failed";
-  const statusContext = `${snapshot.state}:${vision.snapshot.runtime}`;
-  const currentOfflineAnnouncement =
-    offlineAnnouncementContext === statusContext ? offlineAnnouncement : "";
+  const priorityStatus =
+    fatalIntegrity ||
+    offlineRecovery ||
+    snapshot.state === "permission-pending" ||
+    snapshot.state === "recoverable-error" ||
+    snapshot.reason === "switch-failed";
   const liveStatus =
     fatalIntegrity || offlineRecovery || snapshot.state === "recoverable-error"
       ? `Camera status: ${copy.heading}.`
       : snapshot.state === "permission-pending"
         ? "Camera permission requested."
-        : currentOfflineAnnouncement;
+        : offlineAnnouncement;
   useEffect(() => {
     const previous = previousOfflineStateRef.current;
     previousOfflineStateRef.current = vision.snapshot.offlineCache;
-    if (previous !== "ready" && vision.snapshot.offlineCache === "ready") {
+    if (
+      previous !== "ready" &&
+      vision.snapshot.offlineCache === "ready" &&
+      !priorityStatus
+    ) {
       setOfflineAnnouncement("Smart Smile is ready for offline use");
-      setOfflineAnnouncementContext(statusContext);
     }
-  }, [statusContext, vision.snapshot.offlineCache]);
+  }, [priorityStatus, vision.snapshot.offlineCache]);
+  useLayoutEffect(() => {
+    fatalIntegrityRef.current = fatalIntegrity;
+    const enteredFatal = fatalIntegrity && !previousFatalIntegrityRef.current;
+    previousFatalIntegrityRef.current = fatalIntegrity;
+    if (!enteredFatal) return;
+
+    actionGenerationRef.current += 1;
+    consumedCameraStartRef.current = null;
+    setPreflighting(false);
+    setFirstUseOffline(false);
+    setOfflineAnnouncement("");
+    setCameraStartRequest(null);
+    stop();
+  }, [fatalIntegrity, stop]);
+  useLayoutEffect(() => {
+    const enteredPriorityStatus =
+      priorityStatus && !previousPriorityStatusRef.current;
+    previousPriorityStatusRef.current = priorityStatus;
+    if (enteredPriorityStatus) setOfflineAnnouncement("");
+  }, [priorityStatus]);
   useLayoutEffect(() => {
     if (
+      fatalIntegrityRef.current ||
       cameraStartRequest === null ||
       consumedCameraStartRef.current === cameraStartRequest
     ) {
@@ -486,9 +515,6 @@ export default function App() {
       );
     });
   }, [cameraStartRequest, restart, start]);
-  useEffect(() => {
-    if (fatalIntegrity && active) stop();
-  }, [active, fatalIntegrity, stop]);
   useLayoutEffect(() => {
     if (snapshot.reason === "switch-failed") primaryActionRef.current?.focus();
     else if (recovery) recoveryHeadingRef.current?.focus();
@@ -498,7 +524,6 @@ export default function App() {
     setPreflighting(false);
     setFirstUseOffline(false);
     setOfflineAnnouncement("");
-    setOfflineAnnouncementContext("");
     consumedCameraStartRef.current = null;
     setCameraStartRequest(null);
     stop();
@@ -509,12 +534,16 @@ export default function App() {
     actionGenerationRef.current = generation;
     setFirstUseOffline(false);
     setOfflineAnnouncement("");
-    setOfflineAnnouncementContext("");
     setPreflighting(true);
     const result = restartRequested
       ? await vision.restart()
       : await vision.prepare();
-    if (actionGenerationRef.current !== generation) return;
+    if (
+      actionGenerationRef.current !== generation ||
+      fatalIntegrityRef.current
+    ) {
+      return;
+    }
     setPreflighting(false);
     if (result === "first-use-offline") {
       setFirstUseOffline(true);
@@ -525,9 +554,13 @@ export default function App() {
       snapshot.state === "privacy-introduction" ? "start" : "restart",
     );
   };
+  const runSwitchCamera = () => {
+    setOfflineAnnouncement("");
+    switchCamera();
+  };
   const runAction = () => {
     if (fatalIntegrity) window.location.reload();
-    else if (snapshot.reason === "switch-failed") switchCamera();
+    else if (snapshot.reason === "switch-failed") runSwitchCamera();
     else if (preflighting) stopCombined();
     else if (offlineRecovery) void beginCombined(true);
     else if (snapshot.state === "privacy-introduction") {
@@ -629,9 +662,9 @@ export default function App() {
                       >
                         {copy.heading}
                       </h1>
-                      {currentOfflineAnnouncement && (
+                      {offlineAnnouncement && (
                         <span className="visually-hidden">
-                          {currentOfflineAnnouncement}
+                          {offlineAnnouncement}
                         </span>
                       )}
                     </div>
@@ -650,7 +683,7 @@ export default function App() {
                           aria-busy={switchBusy || undefined}
                           className="session-control session-control--switch"
                           disabled={switchBusy}
-                          onClick={switchCamera}
+                          onClick={runSwitchCamera}
                           ref={
                             snapshot.reason === "switch-failed"
                               ? primaryActionRef
@@ -712,7 +745,7 @@ export default function App() {
                   <button
                     className="secondary-action"
                     type="button"
-                    onClick={switchCamera}
+                    onClick={runSwitchCamera}
                   >
                     Switch camera
                   </button>

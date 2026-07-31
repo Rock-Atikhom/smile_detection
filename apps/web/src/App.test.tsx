@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -53,6 +54,15 @@ function resetVision() {
     retryAvailable: false,
     runtime: "ready",
     wasmTier: "simd",
+  });
+}
+
+function setVisionIntegrityFailure() {
+  Object.assign(vision.snapshot, {
+    offlineCache: "error",
+    reason: "runtime-integrity-failed",
+    runtime: "error",
+    wasmTier: "unknown",
   });
 }
 
@@ -260,6 +270,19 @@ describe("Smart Smile camera session", () => {
     expect(video).toHaveClass("camera-preview");
     expect(screen.getByLabelText("Camera status")).toHaveTextContent(
       "Getting ready",
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Help & system status" }),
+    );
+    const warmupHelp = screen.getByRole("dialog", {
+      name: "Help & system status",
+    });
+    expect(
+      within(warmupHelp).getByText("Camera").closest("div"),
+    ).toHaveTextContent("Preparing");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close system status" }),
     );
 
     await vi.runAllTimersAsync();
@@ -646,6 +669,69 @@ describe("Smart Smile camera session", () => {
     expect(vision.restart).not.toHaveBeenCalled();
   });
 
+  it("does not repeat offline readiness after successful or failed camera switches", async () => {
+    vi.useFakeTimers();
+    Object.assign(vision.snapshot, {
+      offlineCache: "caching",
+      runtime: "ready",
+    });
+    const first = makeStream();
+    const second = makeStream();
+    second.track.getSettings = () => ({
+      facingMode: "environment",
+      height: 720,
+      width: 1280,
+    });
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValueOnce(first.stream)
+      .mockResolvedValueOnce(second.stream)
+      .mockRejectedValueOnce({ name: "NotReadableError" });
+    installCamera(getUserMedia);
+    const { rerender } = render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    const video = getCameraPreview();
+    fireEvent.loadedData(video);
+    await vi.runAllTimersAsync();
+    expect(screen.getByRole("heading", { name: "Camera ready" })).toBeVisible();
+
+    Object.assign(vision.snapshot, { offlineCache: "ready" });
+    rerender(<App />);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Smart Smile is ready for offline use",
+    );
+
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: 2,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Switch camera" }));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.runAllTimersAsync();
+    expect(video.srcObject).toBe(second.stream);
+    await vi.advanceTimersByTimeAsync(CAMERA_WARMUP_MS);
+    expect(screen.getByRole("heading", { name: "Camera ready" })).toBeVisible();
+    expect(screen.getByRole("status")).not.toHaveTextContent(
+      "Smart Smile is ready for offline use",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch camera" }));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(
+      screen.getByRole("heading", { name: "Could not switch cameras" }),
+    ).toBeVisible();
+    expect(screen.getByRole("status")).not.toHaveTextContent(
+      "Smart Smile is ready for offline use",
+    );
+    expect(vision.cancel).not.toHaveBeenCalled();
+    expect(vision.restart).not.toHaveBeenCalled();
+  });
+
   it("reports bounded runtime and offline status without exposing raw failures", () => {
     Object.assign(vision.snapshot, {
       offlineCache: "not-ready",
@@ -726,7 +812,7 @@ describe("Smart Smile camera session", () => {
 
     Object.assign(vision.snapshot, { runtime: "ready" });
     rerender(<App />);
-    expect(screen.getByRole("status")).not.toHaveTextContent(
+    expect(screen.getByRole("status")).toHaveTextContent(
       "Smart Smile is ready for offline use",
     );
 
@@ -742,6 +828,67 @@ describe("Smart Smile camera session", () => {
     );
   });
 
+  it("does not start camera when integrity fails before vision preflight resolves", async () => {
+    let finishPreflight!: (result: "started") => void;
+    vision.prepare.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishPreflight = resolve;
+        }),
+    );
+    const getUserMedia = vi.fn().mockResolvedValue(makeStream().stream);
+    installCamera(getUserMedia);
+    const { rerender } = render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+    await waitFor(() => expect(vision.prepare).toHaveBeenCalledOnce());
+
+    setVisionIntegrityFailure();
+    rerender(<App />);
+    const recovery = screen.getByRole("heading", {
+      name: "Smart Smile could not start safely",
+    });
+    expect(recovery).toHaveFocus();
+
+    await act(async () => {
+      finishPreflight("started");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(recovery).toHaveFocus();
+  });
+
+  it("discards a queued camera start when integrity fails before layout execution", async () => {
+    let finishPreflight!: (result: "started") => void;
+    vision.prepare.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishPreflight = resolve;
+        }),
+    );
+    const getUserMedia = vi.fn().mockResolvedValue(makeStream().stream);
+    installCamera(getUserMedia);
+    const { rerender } = render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+    await waitFor(() => expect(vision.prepare).toHaveBeenCalledOnce());
+
+    await act(async () => {
+      finishPreflight("started");
+      await Promise.resolve();
+      setVisionIntegrityFailure();
+      rerender(<App />);
+    });
+
+    const recovery = screen.getByRole("heading", {
+      name: "Smart Smile could not start safely",
+    });
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(recovery).toHaveFocus();
+  });
+
   it("stops the camera and focuses safe recovery after an integrity failure", async () => {
     const { stream, track } = makeStream();
     installCamera(() => Promise.resolve(stream));
@@ -752,12 +899,7 @@ describe("Smart Smile camera session", () => {
     fireEvent.loadedData(video);
     await screen.findByRole("heading", { name: "Getting ready" });
 
-    Object.assign(vision.snapshot, {
-      offlineCache: "error",
-      reason: "runtime-integrity-failed",
-      runtime: "error",
-      wasmTier: "unknown",
-    });
+    setVisionIntegrityFailure();
     rerender(<App />);
 
     const heading = await screen.findByRole("heading", {
@@ -820,9 +962,19 @@ describe("Smart Smile camera session", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
     await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
     fireEvent.loadedData(getCameraPreview());
     await vi.runAllTimersAsync();
 
+    expect(
+      screen.queryByRole("heading", { name: "Camera ready" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Getting smile detection ready" }),
+    ).toBeVisible();
+
+    Object.assign(vision.snapshot, { runtime: "idle" });
+    rerender(<App />);
     expect(
       screen.queryByRole("heading", { name: "Camera ready" }),
     ).not.toBeInTheDocument();
