@@ -54,6 +54,21 @@ function installCamera(
   });
 }
 
+function getCameraPreview() {
+  const video = document.querySelector<HTMLVideoElement>(
+    "video.camera-preview",
+  );
+  if (!video) throw new Error("Expected the camera preview video to render");
+  return video;
+}
+
+async function findCameraPreview() {
+  await vi.waitFor(() =>
+    expect(document.querySelector("video.camera-preview")).toBeTruthy(),
+  );
+  return getCameraPreview();
+}
+
 describe("Smart Smile camera session", () => {
   afterEach(() => {
     cleanup();
@@ -108,7 +123,7 @@ describe("Smart Smile camera session", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
-    const video = screen.getByLabelText("Live camera preview");
+    const video = getCameraPreview();
     await vi.advanceTimersByTimeAsync(0);
     fireEvent.loadedData(video);
     await vi.advanceTimersByTimeAsync(0);
@@ -163,7 +178,7 @@ describe("Smart Smile camera session", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
     await screen.findByRole("heading", { name: "Starting the camera" });
-    const video = screen.getByLabelText("Live camera preview");
+    const video = getCameraPreview();
     fireEvent.loadedData(video);
     expect(
       await screen.findByRole("heading", {
@@ -188,7 +203,7 @@ describe("Smart Smile camera session", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
     await vi.advanceTimersByTimeAsync(CAMERA_ATTACHMENT_TIMEOUT_MS - 1_000);
-    fireEvent.loadedData(screen.getByLabelText("Live camera preview"));
+    fireEvent.loadedData(getCameraPreview());
     await vi.advanceTimersByTimeAsync(1_001);
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
@@ -212,7 +227,7 @@ describe("Smart Smile camera session", () => {
         "Starting the camera",
       ),
     );
-    const video = screen.getByLabelText("Live camera preview");
+    const video = getCameraPreview();
     fireEvent.loadedData(video);
     await vi.advanceTimersByTimeAsync(0);
     expect(vi.getTimerCount()).toBe(1);
@@ -237,7 +252,7 @@ describe("Smart Smile camera session", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
     await vi.advanceTimersByTimeAsync(0);
-    const video = screen.getByLabelText("Live camera preview");
+    const video = getCameraPreview();
     fireEvent.loadedData(video);
     await vi.advanceTimersByTimeAsync(0);
     expect(vi.getTimerCount()).toBe(1);
@@ -284,7 +299,7 @@ describe("Smart Smile camera session", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
-    const video = await screen.findByLabelText("Live camera preview");
+    const video = await findCameraPreview();
     fireEvent.loadedData(video);
     await screen.findByRole("heading", { name: "Getting ready" });
     Object.defineProperty(video, "readyState", {
@@ -299,7 +314,7 @@ describe("Smart Smile camera session", () => {
       }),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Switch camera" })).toBeEnabled();
-    expect(screen.getByLabelText("Live camera preview")).toBeVisible();
+    expect(getCameraPreview()).toBeVisible();
     expect(screen.getByLabelText("Camera status")).toHaveTextContent(
       "Camera status: Could not switch cameras.",
     );
@@ -330,9 +345,7 @@ describe("Smart Smile camera session", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
-    const video = (await screen.findByLabelText(
-      "Live camera preview",
-    )) as HTMLVideoElement;
+    const video = await findCameraPreview();
     fireEvent.loadedData(video);
     await screen.findByRole("heading", { name: "Getting ready" });
     fireEvent.click(screen.getByRole("button", { name: "Switch camera" }));
@@ -358,7 +371,7 @@ describe("Smart Smile camera session", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
-    let video = await screen.findByLabelText("Live camera preview");
+    let video = await findCameraPreview();
     fireEvent.loadedData(video);
     await screen.findByRole("heading", { name: "Getting ready" });
     first.track.dispatchEvent(new Event("ended"));
@@ -371,7 +384,7 @@ describe("Smart Smile camera session", () => {
       "Camera status: The camera stopped.",
     );
     fireEvent.click(screen.getByRole("button", { name: "Restart camera" }));
-    video = await screen.findByLabelText("Live camera preview");
+    video = await findCameraPreview();
     fireEvent.loadedData(video);
     expect(
       await screen.findByRole("heading", { name: "Getting ready" }),
@@ -393,7 +406,7 @@ describe("Smart Smile camera session", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
     await screen.findByRole("heading", { name: "Starting the camera" });
-    const video = screen.getByLabelText("Live camera preview");
+    const video = getCameraPreview();
     fireEvent.loadedData(video);
     await screen.findByRole("heading", { name: "Getting ready" });
 
@@ -436,7 +449,8 @@ describe("Smart Smile camera session", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
-    const video = await screen.findByLabelText("Live camera preview");
+    const video = await findCameraPreview();
+    expect(video).toHaveAttribute("aria-hidden", "true");
     fireEvent.loadedData(video);
 
     const overlay = await screen.findByRole("region", {

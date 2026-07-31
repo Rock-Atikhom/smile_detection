@@ -410,7 +410,7 @@ export default function App() {
           {active ? (
             <>
               <video
-                aria-label="Live camera preview"
+                aria-hidden="true"
                 autoPlay
                 className="camera-preview"
                 muted
