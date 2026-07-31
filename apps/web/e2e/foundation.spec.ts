@@ -67,6 +67,53 @@ for (const viewport of viewports) {
   });
 }
 
+test("keeps the complete mobile camera journey in the first viewport", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    const original = navigator.mediaDevices.enumerateDevices.bind(
+      navigator.mediaDevices,
+    );
+    navigator.mediaDevices.enumerateDevices = async () => {
+      const devices = await original();
+      const video = devices.find((device) => device.kind === "videoinput");
+      return video
+        ? [
+            video,
+            {
+              deviceId: "synthetic-second-camera",
+              groupId: "synthetic-camera-group",
+              kind: "videoinput",
+              label: "",
+              toJSON: () => ({}),
+            },
+          ]
+        : devices;
+    };
+  });
+  await page.goto("/");
+
+  for (const name of ["Continue to camera", "Help & system status"]) {
+    await expect(page.getByRole("button", { name })).toBeInViewport();
+  }
+  expect(await page.evaluate(() => scrollY)).toBe(0);
+
+  await page.getByRole("button", { name: "Continue to camera" }).click();
+  await expect(page.getByRole("button", { name: "Stop camera" })).toBeVisible();
+  for (const name of ["Stop camera", "Switch camera", "Help & system status"]) {
+    await expect(page.getByRole("button", { name })).toBeInViewport();
+  }
+  expect(await page.evaluate(() => scrollY)).toBe(0);
+
+  const screenshot = testInfo.outputPath("mobile-camera-ready.png");
+  await page.screenshot({ path: screenshot });
+  await testInfo.attach("mobile-camera-ready", {
+    path: screenshot,
+    contentType: "image/png",
+  });
+});
+
 test("opens the privacy dialog under production CSP without requesting camera or adding later features", async ({
   page,
 }) => {

@@ -136,11 +136,15 @@ function PrivacyDisclosure() {
   return (
     <Dialog.Root modal={false} open={open} onOpenChange={setOpen}>
       <Dialog.Trigger
+        aria-label="How privacy works"
         className="privacy-trigger"
         ref={triggerRef}
         type="button"
       >
-        How privacy works
+        <span className="privacy-trigger__wide">How privacy works</span>
+        <span aria-hidden="true" className="privacy-trigger__compact">
+          Privacy
+        </span>
       </Dialog.Trigger>
       <NativeDialog
         closeLabel="Close privacy details"
@@ -189,7 +193,7 @@ function SystemStatus({
       onOpenChange={setEffectiveOpen}
     >
       <Dialog.Trigger
-        className="secondary-action"
+        className="secondary-action system-status-trigger"
         ref={triggerRef}
         type="button"
       >
@@ -303,6 +307,10 @@ export default function App() {
     snapshot.state === "ready" ||
     snapshot.reason === "switch-failed";
   const recovery = snapshot.state === "recoverable-error";
+  const showSwitch =
+    snapshot.canSwitch &&
+    (snapshot.state === "warm-up" || snapshot.state === "ready") &&
+    snapshot.reason !== "switch-failed";
   const liveStatus =
     snapshot.reason === "switch-failed"
       ? `Camera status: ${copy.heading}.`
@@ -393,27 +401,31 @@ export default function App() {
           >
             {liveStatus}
           </p>
-          {copy.action && (
-            <button
-              className="primary-action"
-              type="button"
-              onClick={runAction}
-              ref={primaryActionRef}
+          {(copy.action || showSwitch) && (
+            <div
+              className={`camera-actions${copy.action && showSwitch ? " camera-actions--split" : ""}`}
             >
-              {copy.action}
-            </button>
+              {copy.action && (
+                <button
+                  className="primary-action"
+                  type="button"
+                  onClick={runAction}
+                  ref={primaryActionRef}
+                >
+                  {copy.action}
+                </button>
+              )}
+              {showSwitch && (
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={switchCamera}
+                >
+                  Switch camera
+                </button>
+              )}
+            </div>
           )}
-          {snapshot.canSwitch &&
-            (snapshot.state === "warm-up" || snapshot.state === "ready") &&
-            snapshot.reason !== "switch-failed" && (
-              <button
-                className="secondary-action"
-                type="button"
-                onClick={switchCamera}
-              >
-                Switch camera
-              </button>
-            )}
           {recovery && (
             <p className="next-step">
               You can open Help &amp; system status for a read-only session

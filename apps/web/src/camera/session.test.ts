@@ -238,6 +238,39 @@ describe("camera session lifecycle", () => {
     });
   });
 
+  it("offers facing-mode switching on mobile when enumeration exposes only the active camera", async () => {
+    const mobileTrack = makeTrack({ deviceId: "front", facingMode: "user" });
+    const rearTrack = makeTrack({ facingMode: "environment" });
+    const { getUserMedia, session } = createHarness({
+      enumerateDevices: () =>
+        Promise.resolve([
+          { deviceId: "front", kind: "videoinput" },
+        ] as MediaDeviceInfo[]),
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(mobileTrack))
+        .mockResolvedValueOnce(makeStream(rearTrack)),
+      mobile: true,
+    });
+
+    await session.start();
+    await vi.waitFor(() => expect(session.snapshot.canSwitch).toBe(true));
+    await session.switchCamera();
+
+    expect(getUserMedia.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        video: expect.objectContaining({
+          facingMode: { exact: "environment" },
+        }),
+      }),
+    );
+    expect(session.snapshot).toMatchObject({
+      facingMode: "environment",
+      generation: 2,
+      state: "warm-up",
+    });
+  });
+
   it("invalidates the public generation immediately when an active track ends", async () => {
     vi.useFakeTimers();
     const firstTrack = makeTrack();
@@ -417,6 +450,34 @@ describe("camera session lifecycle", () => {
     await switching;
 
     expect(firstTrack.stop).toHaveBeenCalledOnce();
+    expect(session.snapshot).toMatchObject({
+      facingMode: "environment",
+      generation: 2,
+      state: "warm-up",
+    });
+  });
+
+  it("does not cancel an intentional switch when the browser ends the prior mobile track", async () => {
+    const firstTrack = makeTrack({
+      facingMode: "user",
+      facingModes: ["user", "environment"],
+    });
+    const secondTrack = makeTrack({ facingMode: "environment" });
+    const { session } = createHarness({
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(firstTrack))
+        .mockImplementationOnce(() => {
+          firstTrack.dispatchEvent(new Event("ended"));
+          return Promise.resolve(makeStream(secondTrack));
+        }),
+      mobile: true,
+    });
+
+    await session.start();
+    await session.switchCamera();
+
+    expect(secondTrack.stop).not.toHaveBeenCalled();
     expect(session.snapshot).toMatchObject({
       facingMode: "environment",
       generation: 2,

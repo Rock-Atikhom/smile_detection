@@ -1,4 +1,4 @@
-Status: implementation complete — real-device preview review pending
+Status: phone-review correction implemented — phone preview retest pending
 Execution: agent-led, with human UX review
 
 # 02 — Start a privacy-first responsive camera session
@@ -120,3 +120,12 @@ Ticket 01 privacy and delivery guarantee.
 - Run formatting, lint, TypeScript, unit/component tests, production build, Playwright,
   Python tests, Python formatting/lint/type checks, `git diff --check`, and confirm a
   clean worktree. Commit the implementation and write the required task report.
+
+## Phone review correction
+
+The first phone review found that camera switching was unavailable and the primary
+controls fell below the initial 390×844 viewport. The correction treats a mobile
+facing-mode choice as switchable even when enumeration exposes only the active camera,
+keeps intentional replacement ownership when Safari ends the prior track, and presents
+the preview with Stop, Switch, and Help controls together in the first mobile viewport.
+The phone criterion remains open until the corrected HTTPS preview is reviewed again.

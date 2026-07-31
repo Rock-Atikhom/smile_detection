@@ -278,6 +278,11 @@ Camera switch algorithm:
 5. warm up the new stream;
 6. restore the previous stream or offer recovery when switching fails.
 
+On mobile, the facing-mode control remains available when device enumeration exposes
+only the active camera. Some mobile browsers end the prior track while fulfilling the
+replacement `getUserMedia` request; that intentional end belongs to the switch attempt
+and must not be interpreted as an unrelated interruption that cancels the candidate.
+
 Tab hiding stops inference and may stop the camera after a short policy delay. A returned page never reuses earlier evidence.
 
 ## 9. Capture pipeline

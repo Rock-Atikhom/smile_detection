@@ -126,6 +126,7 @@ export class CameraSession {
   private listeners = new Set<(snapshot: CameraSnapshot) => void>();
   private requestEpoch = 0;
   private snapshotValue = createInitialCameraSnapshot();
+  private switchingFromStream: MediaStream | undefined;
   private warmupTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly deps: CameraSessionDependencies) {}
@@ -183,8 +184,12 @@ export class CameraSession {
           this.deviceIds.length
         : -1;
     const nextDeviceId = nextIndex >= 0 ? this.deviceIds[nextIndex] : undefined;
-    const alternateFacing =
-      oldTrack?.getSettings().facingMode === "user" ? "environment" : "user";
+    const currentFacing =
+      oldTrack?.getSettings().facingMode ??
+      this.lastFacingMode ??
+      (this.deps.isMobile() ? "user" : undefined);
+    const alternateFacing = currentFacing === "user" ? "environment" : "user";
+    this.switchingFromStream = oldStream;
     const { epoch, outcome } = await this.acquire(
       switchedConstraints(nextDeviceId, alternateFacing),
       true,
@@ -193,6 +198,8 @@ export class CameraSession {
         facingMode: nextDeviceId ? undefined : alternateFacing,
       },
     );
+    if (this.switchingFromStream === oldStream)
+      this.switchingFromStream = undefined;
     if (
       outcome !== "failed" ||
       epoch !== this.requestEpoch ||
@@ -328,6 +335,7 @@ export class CameraSession {
       this.snapshotValue = {
         ...this.snapshotValue,
         canSwitch:
+          this.deps.isMobile() ||
           this.deviceIds.length > 1 ||
           (Array.isArray(capabilities?.facingMode) &&
             capabilities.facingMode.length > 1),
@@ -434,6 +442,7 @@ export class CameraSession {
   }
   private handleTrackEnded(stream: MediaStream) {
     if (stream !== this.activeStream) return;
+    if (stream === this.switchingFromStream) return;
     this.invalidateInFlightAndOwned();
     // A stopped track cannot produce a valid result, so invalidate the public
     // generation before publishing the interruption state.
