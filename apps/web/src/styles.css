@@ -752,6 +752,56 @@ h1 {
   }
 }
 
+@media (max-height: 300px) {
+  .app-shell--camera-active {
+    min-height: 100%;
+    padding: 8px;
+    overflow: visible;
+  }
+
+  .foundation-layout--camera-active {
+    height: auto;
+  }
+
+  .camera-stage--session {
+    display: block;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    border-radius: 16px;
+  }
+
+  .camera-stage--session .camera-preview {
+    position: relative;
+    display: block;
+    height: max(10rem, 55dvh);
+  }
+
+  .camera-stage--session .capture-zone {
+    display: none;
+  }
+
+  .camera-session-overlay {
+    position: static;
+    display: grid;
+    grid-template-rows: auto auto;
+    background: var(--camera-surround);
+  }
+
+  .session-chrome__top {
+    padding: 10px;
+  }
+
+  .session-chrome__bottom {
+    padding: 0 10px 10px;
+  }
+
+  .session-status,
+  .session-controls {
+    width: 100%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
