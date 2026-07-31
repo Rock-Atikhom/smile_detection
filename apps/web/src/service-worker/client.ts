@@ -186,8 +186,10 @@ function createVisionCacheClient(
   };
 }
 
-export async function registerApplicationServiceWorker(
-  dependencies: RegisterServiceWorkerDependencies = {},
+let productionClientPromise: Promise<VisionCacheClient> | undefined;
+
+async function createApplicationServiceWorkerClient(
+  dependencies: RegisterServiceWorkerDependencies,
 ): Promise<VisionCacheClient> {
   const serviceWorker =
     dependencies.serviceWorker ??
@@ -204,4 +206,14 @@ export async function registerApplicationServiceWorker(
   } catch {
     return degradedClient();
   }
+}
+
+export function registerApplicationServiceWorker(
+  dependencies?: RegisterServiceWorkerDependencies,
+): Promise<VisionCacheClient> {
+  if (dependencies !== undefined) {
+    return createApplicationServiceWorkerClient(dependencies);
+  }
+  productionClientPromise ??= createApplicationServiceWorkerClient({});
+  return productionClientPromise;
 }

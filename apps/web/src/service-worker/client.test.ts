@@ -221,4 +221,25 @@ describe("VisionCacheClient", () => {
     expect(states).toEqual(["error"]);
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("shares one production registration promise without coupling injected clients", async () => {
+    const production = new FakeServiceWorkerContainer();
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: production,
+    });
+
+    const first = registerApplicationServiceWorker();
+    const second = registerApplicationServiceWorker();
+
+    expect(second).toBe(first);
+    await expect(first).resolves.toBeDefined();
+    expect(production.register).toHaveBeenCalledOnce();
+    expect(production.listeners.size).toBe(1);
+
+    const injected = new FakeServiceWorkerContainer();
+    await registerApplicationServiceWorker({ serviceWorker: injected });
+    expect(injected.register).toHaveBeenCalledOnce();
+    expect(production.register).toHaveBeenCalledOnce();
+  });
 });
