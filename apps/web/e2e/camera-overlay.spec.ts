@@ -134,6 +134,26 @@ test("reflows status and controls below the preview at the 400 percent equivalen
   const status = overlay.getByRole("status");
   await expect(overlay).toHaveCSS("position", "static");
 
+  const shortViewportPadding = await page.evaluate(() => {
+    const padding = (selector: string) => {
+      const styles = getComputedStyle(document.querySelector(selector)!);
+      return [
+        styles.paddingTop,
+        styles.paddingRight,
+        styles.paddingBottom,
+        styles.paddingLeft,
+      ];
+    };
+    return {
+      bottom: padding(".session-chrome__bottom"),
+      top: padding(".session-chrome__top"),
+    };
+  });
+  expect(shortViewportPadding).toEqual({
+    bottom: ["0px", "10px", "10px", "10px"],
+    top: ["10px", "10px", "10px", "10px"],
+  });
+
   const videoBox = await video.boundingBox();
   const statusBox = await status.boundingBox();
   expect(statusBox!.y).toBeGreaterThanOrEqual(videoBox!.y + videoBox!.height);
