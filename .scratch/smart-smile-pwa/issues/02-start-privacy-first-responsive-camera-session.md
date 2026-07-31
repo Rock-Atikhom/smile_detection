@@ -1,4 +1,4 @@
-Status: phone-review correction implemented — phone preview retest pending
+Status: mobile switch correction implemented — phone switch retest pending before UX work
 Execution: agent-led, with human UX review
 
 # 02 — Start a privacy-first responsive camera session
@@ -129,3 +129,8 @@ facing-mode choice as switchable even when enumeration exposes only the active c
 keeps intentional replacement ownership when Safari ends the prior track, and presents
 the preview with Stop, Switch, and Help controls together in the first mobile viewport.
 The phone criterion remains open until the corrected HTTPS preview is reviewed again.
+
+The second phone review still could not change cameras. Mobile switching now explicitly
+releases the active track before requesting the replacement because the phone browser
+does not permit concurrent ownership. Desktop switching retains candidate-first
+validation. No further UX/UI changes are included until real-phone switching passes.

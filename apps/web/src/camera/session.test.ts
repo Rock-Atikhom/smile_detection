@@ -464,6 +464,66 @@ describe("camera session lifecycle", () => {
     });
   });
 
+  it("releases the active mobile camera before requesting and attaching its replacement", async () => {
+    const sequence: string[] = [];
+    const firstTrack = makeTrack({ facingMode: "user" });
+    firstTrack.stop = vi.fn(() => {
+      sequence.push("stop-old");
+      firstTrack.readyState = "ended";
+    });
+    const secondTrack = makeTrack({ facingMode: "environment" });
+    let attachment = 0;
+    const { session } = createHarness({
+      attachAndPlay: () => {
+        attachment += 1;
+        if (attachment === 2) sequence.push("attach-new");
+        return Promise.resolve({ height: 720, width: 1280 });
+      },
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(firstTrack))
+        .mockImplementationOnce(() => {
+          sequence.push("request-new");
+          return Promise.resolve(makeStream(secondTrack));
+        }),
+      mobile: true,
+    });
+
+    await session.start();
+    await session.switchCamera();
+
+    expect(sequence).toEqual(["stop-old", "request-new", "attach-new"]);
+    expect(session.snapshot).toMatchObject({
+      facingMode: "environment",
+      generation: 2,
+      state: "warm-up",
+    });
+  });
+
+  it("publishes interruption recovery when a released mobile replacement fails", async () => {
+    const firstTrack = makeTrack({ facingMode: "user" });
+    const restore = vi.fn(() => Promise.resolve());
+    const { session } = createHarness({
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(firstTrack))
+        .mockRejectedValueOnce({ name: "NotReadableError" }),
+      mobile: true,
+      restore,
+    });
+
+    await session.start();
+    await session.switchCamera();
+
+    expect(firstTrack.stop).toHaveBeenCalledOnce();
+    expect(restore).not.toHaveBeenCalled();
+    expect(session.snapshot).toMatchObject({
+      generation: 2,
+      reason: "interruption",
+      state: "recoverable-error",
+    });
+  });
+
   it("does not cancel an intentional switch when the browser ends the prior mobile track", async () => {
     const firstTrack = makeTrack({
       facingMode: "user",

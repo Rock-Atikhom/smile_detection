@@ -279,9 +279,11 @@ Camera switch algorithm:
 6. restore the previous stream or offer recovery when switching fails.
 
 On mobile, the facing-mode control remains available when device enumeration exposes
-only the active camera. Some mobile browsers end the prior track while fulfilling the
-replacement `getUserMedia` request; that intentional end belongs to the switch attempt
-and must not be interpreted as an unrelated interruption that cancels the candidate.
+only the active camera. Mobile switching releases the active track before requesting
+the replacement because some phone browsers cannot grant concurrent camera ownership.
+Desktop switching retains candidate-first validation. If a released mobile replacement
+fails, the session publishes interruption recovery and never claims that the ended
+preview remains active.
 
 Tab hiding stops inference and may stop the camera after a short policy delay. A returned page never reuses earlier evidence.
 

@@ -189,7 +189,14 @@ export class CameraSession {
       this.lastFacingMode ??
       (this.deps.isMobile() ? "user" : undefined);
     const alternateFacing = currentFacing === "user" ? "environment" : "user";
+    const releaseBeforeRequest = this.deps.isMobile();
     this.switchingFromStream = oldStream;
+    if (releaseBeforeRequest) {
+      stopTracks(oldStream);
+      this.activeStream = undefined;
+      this.activeTrack = undefined;
+      this.deps.detach?.();
+    }
     const { epoch, outcome } = await this.acquire(
       switchedConstraints(nextDeviceId, alternateFacing),
       true,
@@ -200,12 +207,12 @@ export class CameraSession {
     );
     if (this.switchingFromStream === oldStream)
       this.switchingFromStream = undefined;
-    if (
-      outcome !== "failed" ||
-      epoch !== this.requestEpoch ||
-      this.activeStream !== oldStream
-    )
+    if (outcome !== "failed" || epoch !== this.requestEpoch) return;
+    if (releaseBeforeRequest) {
+      this.publishInterruption();
       return;
+    }
+    if (this.activeStream !== oldStream) return;
     if (oldTrack?.readyState === "ended") {
       this.publishInterruption();
       return;
