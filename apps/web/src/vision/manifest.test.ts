@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   getAssetByRole,
   parseVisionManifest,
+  VISION_RELEASE_PATH_PREFIX,
   type VisionReleaseManifest,
 } from "./manifest";
 
 const releaseId = "0123456789abcdef";
-const releasePath = "/vision/test-release";
+const releasePath = VISION_RELEASE_PATH_PREFIX.slice(0, -1);
 
 const validManifest: VisionReleaseManifest = {
   assets: [
@@ -54,6 +55,13 @@ describe("parseVisionManifest", () => {
       },
     ],
     [
+      "a same-origin asset path outside the release directory",
+      {
+        ...validManifest,
+        assets: [{ ...validManifest.assets[0], path: "/assets/unrelated.js" }],
+      },
+    ],
+    [
       "duplicate asset IDs",
       {
         ...validManifest,
@@ -95,6 +103,15 @@ describe("parseVisionManifest", () => {
             ...validManifest.assets[0],
             licenseRef: "https://example.test/LICENSE",
           },
+        ],
+      },
+    ],
+    [
+      "a same-origin license path outside the release directory",
+      {
+        ...validManifest,
+        assets: [
+          { ...validManifest.assets[0], licenseRef: "/other/LICENSE.txt" },
         ],
       },
     ],

@@ -32,6 +32,9 @@ export interface VisionReleaseManifest {
   assets: VisionAsset[];
 }
 
+export const VISION_RELEASE_PATH_PREFIX =
+  "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/";
+
 const VISION_ASSET_ROLES: readonly VisionAssetRole[] = [
   "wasm-loader-simd",
   "wasm-binary-simd",
@@ -122,6 +125,12 @@ function isSameOriginPath(value: unknown): value is string {
   }
 }
 
+function isVisionReleasePath(value: unknown): value is string {
+  return (
+    isSameOriginPath(value) && value.startsWith(VISION_RELEASE_PATH_PREFIX)
+  );
+}
+
 function isHttpsUrl(value: unknown): value is string {
   if (typeof value !== "string") {
     return false;
@@ -152,8 +161,8 @@ function isVisionAsset(value: unknown): value is VisionAsset {
     value.bytes > 0 &&
     typeof value.id === "string" &&
     ASSET_ID_PATTERN.test(value.id) &&
-    isSameOriginPath(value.licenseRef) &&
-    isSameOriginPath(value.path) &&
+    isVisionReleasePath(value.licenseRef) &&
+    isVisionReleasePath(value.path) &&
     typeof value.requiredForOffline === "boolean" &&
     isVisionAssetRole(value.role) &&
     typeof value.sha256 === "string" &&
