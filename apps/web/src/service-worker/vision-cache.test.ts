@@ -327,6 +327,36 @@ describe("vision release cache transaction", () => {
     expect(other.cacheStorage.deleted).toEqual([]);
   });
 
+  it("cannot commit when cancelled during required-inventory readback verification", async () => {
+    const { cacheStorage, dependencies, operations } = harness();
+    await seedCompletion(cacheStorage, olderReleaseId);
+    operations.length = 0;
+    const originalVerify = dependencies.verifyResponse!;
+    const readbackStarted = deferred<void>();
+    const releaseReadback = deferred<void>();
+    let verificationCalls = 0;
+    dependencies.verifyResponse = vi.fn(async (response, expectedAsset) => {
+      verificationCalls += 1;
+      if (verificationCalls === 2) {
+        readbackStarted.resolve();
+        await releaseReadback.promise;
+      }
+      return originalVerify(response, expectedAsset);
+    });
+
+    const pending = cacheVisionRelease(command(8), dependencies);
+    await readbackStarted.promise;
+    const incomplete = cacheStorage.caches.get(visionCacheName(releaseId))!;
+    cancelVisionRelease(8);
+    releaseReadback.resolve();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(operations).not.toContain(`put-completion:${releaseId}`);
+    expect(incomplete.entries.has(completionUrl(scope, releaseId))).toBe(false);
+    expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
+    expect(cacheStorage.caches.has(visionCacheName(olderReleaseId))).toBe(true);
+  });
+
   it("serializes overlapping generations so one failure cannot orphan its successor", async () => {
     const { cacheStorage, dependencies } = harness();
     const originalFetch = dependencies.fetch;

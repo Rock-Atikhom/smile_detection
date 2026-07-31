@@ -213,19 +213,24 @@ async function fetchManifest(
 async function requiredEntriesAreVerified(
   cache: CacheLike,
   dependencies: VisionCacheDependencies,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   try {
     for (const asset of dependencies.manifest.assets) {
       if (!asset.requiredForOffline) continue;
+      if (signal !== undefined) ensureNotCancelled(signal);
       const cached = await cache.match(asset.path);
+      if (signal !== undefined) ensureNotCancelled(signal);
       if (cached === undefined) return false;
       await (dependencies.verifyResponse ?? verifyVisionResponse)(
         cached,
         asset,
       );
+      if (signal !== undefined) ensureNotCancelled(signal);
     }
     return true;
   } catch {
+    if (signal?.aborted === true) ensureNotCancelled(signal);
     return false;
   }
 }
@@ -233,10 +238,11 @@ async function requiredEntriesAreVerified(
 async function completedCacheIsUsable(
   cache: CacheLike,
   dependencies: VisionCacheDependencies,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   return (
     (await readCompletion(cache, dependencies)) !== undefined &&
-    (await requiredEntriesAreVerified(cache, dependencies))
+    (await requiredEntriesAreVerified(cache, dependencies, signal))
   );
 }
 
@@ -298,7 +304,7 @@ export async function cacheVisionRelease(
     await lock.wait;
     ensureNotCancelled(controller.signal);
     cache = await dependencies.cacheStorage.open(cacheName);
-    if (await completedCacheIsUsable(cache, dependencies)) {
+    if (await completedCacheIsUsable(cache, dependencies, controller.signal)) {
       ensureNotCancelled(controller.signal);
       return "ready";
     }
@@ -317,7 +323,13 @@ export async function cacheVisionRelease(
       await storeAsset(cache, asset, dependencies, controller.signal);
     }
     ensureNotCancelled(controller.signal);
-    if (!(await requiredEntriesAreVerified(cache, dependencies))) {
+    if (
+      !(await requiredEntriesAreVerified(
+        cache,
+        dependencies,
+        controller.signal,
+      ))
+    ) {
       throw new Error("Vision cache readback failed");
     }
     const completion: CompletionRecord = {
@@ -326,6 +338,7 @@ export async function cacheVisionRelease(
       assetCount: release.assets.filter((asset) => asset.requiredForOffline)
         .length,
     };
+    ensureNotCancelled(controller.signal);
     await cache.put(
       completionUrl(dependencies.scope, command.releaseId),
       Response.json(completion),
