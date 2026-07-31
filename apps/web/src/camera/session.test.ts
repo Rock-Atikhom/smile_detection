@@ -234,6 +234,78 @@ describe("camera session lifecycle", () => {
     expect(session.snapshot.state).toBe("stopped");
   });
 
+  it("rejects an initial track that ends while decoded attachment is pending", async () => {
+    let resolveAttachment!: (value: { height: number; width: number }) => void;
+    let attachmentSignal!: AbortSignal;
+    const track = makeTrack();
+    const { attachAndPlay, session } = createHarness({
+      attachAndPlay: (_stream, signal) =>
+        new Promise((resolve) => {
+          attachmentSignal = signal;
+          resolveAttachment = resolve;
+        }),
+      getUserMedia: () => Promise.resolve(makeStream(track)),
+    });
+
+    const pending = session.start();
+    await vi.waitFor(() => expect(attachAndPlay).toHaveBeenCalledOnce());
+    track.dispatchEvent(new Event("ended"));
+    expect(attachmentSignal.aborted).toBe(true);
+    resolveAttachment({ height: 720, width: 1280 });
+    await pending;
+
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(session.snapshot).toMatchObject({
+      generation: 0,
+      permission: "granted",
+      reason: "interruption",
+      state: "recoverable-error",
+    });
+  });
+
+  it("retains the working stream when a switch track ends during decoded attachment", async () => {
+    const firstTrack = makeTrack({
+      facingModes: ["user", "environment"],
+      facingMode: "user",
+    });
+    const candidateTrack = makeTrack({ facingMode: "environment" });
+    let resolveAttachment!: (value: { height: number; width: number }) => void;
+    let attachmentSignal!: AbortSignal;
+    let attachment = 0;
+    const { attachAndPlay, session } = createHarness({
+      attachAndPlay: (_stream, signal) => {
+        attachment += 1;
+        if (attachment === 1)
+          return Promise.resolve({ height: 720, width: 1280 });
+        return new Promise((resolve) => {
+          attachmentSignal = signal;
+          resolveAttachment = resolve;
+        });
+      },
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(firstTrack))
+        .mockResolvedValueOnce(makeStream(candidateTrack)),
+    });
+
+    await session.start();
+    const switching = session.switchCamera();
+    await vi.waitFor(() => expect(attachAndPlay).toHaveBeenCalledTimes(2));
+    candidateTrack.dispatchEvent(new Event("ended"));
+    expect(attachmentSignal.aborted).toBe(true);
+    resolveAttachment({ height: 720, width: 1280 });
+    await switching;
+
+    expect(firstTrack.stop).not.toHaveBeenCalled();
+    expect(candidateTrack.stop).toHaveBeenCalledOnce();
+    expect(session.snapshot).toMatchObject({
+      generation: 1,
+      permission: "granted",
+      reason: "switch-failed",
+      state: "warm-up",
+    });
+  });
+
   it("increments generation only after a stream is attached and enters warm-up", async () => {
     vi.useFakeTimers();
     const { session } = createHarness();
@@ -572,6 +644,7 @@ describe("camera session lifecycle", () => {
     expect(restore).not.toHaveBeenCalled();
     expect(session.snapshot).toMatchObject({
       generation: 2,
+      permission: "granted",
       reason: "interruption",
       state: "recoverable-error",
     });

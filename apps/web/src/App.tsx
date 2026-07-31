@@ -179,11 +179,11 @@ function SystemStatus({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
-  useEffect(() => {
-    if (!open && wasOpen.current) triggerRef.current?.focus();
-    wasOpen.current = open;
-  }, [open]);
   const effectiveOpen = open || openRequest;
+  useEffect(() => {
+    if (!effectiveOpen && wasOpen.current) triggerRef.current?.focus();
+    wasOpen.current = effectiveOpen;
+  }, [effectiveOpen]);
   const setEffectiveOpen = (nextOpen: boolean) => {
     if (!nextOpen) onOpenRequestHandled();
     setOpen(nextOpen);
@@ -261,6 +261,7 @@ function coachCopy(snapshot: CameraSnapshot): Copy {
   }
   if (snapshot.state === "permission-pending") {
     return {
+      action: "Cancel",
       heading: "Allow camera access",
       text: "Your browser will ask to use the camera. Microphone access is not needed.",
     };
@@ -295,8 +296,8 @@ function coachCopy(snapshot: CameraSnapshot): Copy {
   }
   if (snapshot.state === "stopped") {
     return {
-      action: "Start camera",
-      heading: "Camera stopped",
+      action: "Restart camera",
+      heading: "Camera is off",
       text: "You can restart the camera when you are ready.",
     };
   }
@@ -336,21 +337,11 @@ export default function App() {
     (snapshot.state === "warm-up" || snapshot.state === "ready") &&
     snapshot.reason !== "switch-failed";
   const liveStatus =
-    snapshot.reason === "switch-failed"
-      ? `Camera status: ${copy.heading}.`
-      : snapshot.state === "permission-pending"
-        ? "Camera permission requested."
-        : snapshot.state === "camera-starting"
-          ? "Camera starting."
-          : snapshot.state === "camera-switching"
-            ? "Switching camera."
-            : snapshot.state === "warm-up"
-              ? "Hold the device steady while the camera settles."
-              : snapshot.state === "ready"
-                ? "Camera ready."
-                : recovery
-                  ? `Camera status: ${copy.heading}.`
-                  : "";
+    snapshot.state === "permission-pending"
+      ? "Camera permission requested."
+      : recovery
+        ? `Camera status: ${copy.heading}.`
+        : "";
   useLayoutEffect(() => {
     if (snapshot.reason === "switch-failed") primaryActionRef.current?.focus();
     else if (recovery) recoveryHeadingRef.current?.focus();
@@ -360,6 +351,7 @@ export default function App() {
     else if (snapshot.state === "privacy-introduction") start();
     else if (snapshot.state === "stopped") restart();
     else if (
+      snapshot.state === "permission-pending" ||
       snapshot.state === "camera-starting" ||
       snapshot.state === "camera-switching" ||
       snapshot.state === "warm-up" ||
@@ -453,7 +445,6 @@ export default function App() {
                       >
                         {copy.heading}
                       </h1>
-                      <p className="visually-hidden">{liveStatus}</p>
                     </div>
                     <p className="visually-hidden">{copy.text}</p>
                     <div className="session-controls">

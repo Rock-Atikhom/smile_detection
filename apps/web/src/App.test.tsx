@@ -13,14 +13,18 @@ import {
 import App from "./App";
 
 type FakeTrack = EventTarget & {
-  stop: ReturnType<typeof vi.fn>;
   getCapabilities: () => MediaTrackCapabilities;
   getSettings: () => MediaTrackSettings;
+  readyState: MediaStreamTrackState;
+  stop: ReturnType<typeof vi.fn>;
 };
 
 function makeStream() {
   const track = new EventTarget() as FakeTrack;
-  track.stop = vi.fn();
+  track.readyState = "live";
+  track.stop = vi.fn(() => {
+    track.readyState = "ended";
+  });
   track.getCapabilities = () =>
     ({ facingMode: ["user", "environment"] }) as MediaTrackCapabilities;
   track.getSettings = () => ({ facingMode: "user", height: 720, width: 1280 });
@@ -116,6 +120,29 @@ describe("Smart Smile camera session", () => {
     );
   });
 
+  it("cancels an unsettled permission request and disposes its late stream", async () => {
+    let resolveStream!: (stream: MediaStream) => void;
+    const getUserMedia = vi.fn(
+      () =>
+        new Promise<MediaStream>((resolve) => {
+          resolveStream = resolve;
+        }),
+    );
+    installCamera(getUserMedia);
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    const late = makeStream();
+    resolveStream(late.stream);
+    await vi.waitFor(() => expect(late.track.stop).toHaveBeenCalledOnce());
+    expect(getUserMedia).toHaveBeenCalledOnce();
+    expect(
+      screen.getByRole("heading", { name: "Camera is off" }),
+    ).toBeVisible();
+  });
+
   it("shows a mirrored contained preview through warm-up, then supports stopping", async () => {
     vi.useFakeTimers();
     const { stream, track } = makeStream();
@@ -133,7 +160,7 @@ describe("Smart Smile camera session", () => {
     );
     expect(video).toHaveClass("camera-preview");
     expect(screen.getByLabelText("Camera status")).toHaveTextContent(
-      "Hold the device steady while the camera settles.",
+      "Getting ready",
     );
 
     await vi.runAllTimersAsync();
@@ -145,8 +172,11 @@ describe("Smart Smile camera session", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop camera" }));
     expect(track.stop).toHaveBeenCalled();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "Camera stopped",
+      "Camera is off",
     );
+    expect(
+      screen.getByRole("button", { name: "Restart camera" }),
+    ).toBeEnabled();
   });
 
   it("offers plain-language recovery after a browser permission denial", async () => {
@@ -236,7 +266,7 @@ describe("Smart Smile camera session", () => {
     expect(track.stop).toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "Camera stopped",
+      "Camera is off",
     );
   });
 
@@ -263,7 +293,7 @@ describe("Smart Smile camera session", () => {
     expect(track.stop).toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "Camera stopped",
+      "Camera is off",
     );
   });
 
@@ -286,6 +316,12 @@ describe("Smart Smile camera session", () => {
     expect(
       screen.getByRole("dialog", { name: "Help & system status" }),
     ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close system status" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Help & system status" }),
+    ).toHaveFocus();
   });
 
   it("renders the actionable switch-failure recovery while retaining the preview", async () => {
@@ -316,7 +352,7 @@ describe("Smart Smile camera session", () => {
     expect(screen.getByRole("button", { name: "Switch camera" })).toBeEnabled();
     expect(getCameraPreview()).toBeVisible();
     expect(screen.getByLabelText("Camera status")).toHaveTextContent(
-      "Camera status: Could not switch cameras.",
+      "Could not switch cameras",
     );
     expect(screen.getByLabelText("Camera status")).toHaveAttribute(
       "aria-atomic",
@@ -350,13 +386,13 @@ describe("Smart Smile camera session", () => {
     await screen.findByRole("heading", { name: "Getting ready" });
     fireEvent.click(screen.getByRole("button", { name: "Switch camera" }));
     expect(screen.getByLabelText("Camera status")).toHaveTextContent(
-      "Switching camera.",
+      "Switching camera",
     );
 
     resolveCandidate(second.stream);
     await vi.waitFor(() => expect(video.srcObject).toBe(second.stream));
     expect(screen.getByLabelText("Camera status")).toHaveTextContent(
-      "Switching camera.",
+      "Switching camera",
     );
   });
 
@@ -457,7 +493,7 @@ describe("Smart Smile camera session", () => {
       name: "Live camera controls",
     });
     expect(within(overlay).getByRole("status")).toHaveTextContent(
-      "Getting ready",
+      /^Getting ready$/,
     );
     expect(screen.queryByText("Private by design")).not.toBeInTheDocument();
 

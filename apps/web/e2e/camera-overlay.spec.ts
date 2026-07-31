@@ -46,6 +46,14 @@ test("uses the approved full-stage overlay on a portrait phone", async ({
   expect(box?.width).toBeGreaterThanOrEqual(389);
   expect(box?.height).toBeGreaterThanOrEqual(843);
 
+  const topBox = await page.locator(".session-chrome__top").boundingBox();
+  const bottomBox = await page.locator(".session-chrome__bottom").boundingBox();
+  expect(topBox?.height).toBeLessThanOrEqual(80);
+  expect(bottomBox?.height).toBeLessThanOrEqual(150);
+  expect(
+    Math.abs(bottomBox!.y + bottomBox!.height - (box!.y + box!.height)),
+  ).toBeLessThanOrEqual(1);
+
   for (const name of ["Help & system status", "Stop camera", "Switch camera"]) {
     const control = overlay.getByRole("button", { name });
     await expect(control).toBeInViewport();
@@ -157,11 +165,21 @@ test("reflows status and controls below the preview at the 400 percent equivalen
   const videoBox = await video.boundingBox();
   const statusBox = await status.boundingBox();
   expect(statusBox!.y).toBeGreaterThanOrEqual(videoBox!.y + videoBox!.height);
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
 
   for (const name of ["Help & system status", "Stop camera", "Switch camera"]) {
     const control = overlay.getByRole("button", { name });
     await control.scrollIntoViewIfNeeded();
     await expect(control).toBeInViewport();
+    const box = await control.boundingBox();
+    expect(box?.width).toBeGreaterThanOrEqual(48);
+    expect(box?.height).toBeGreaterThanOrEqual(48);
   }
 });
 
@@ -225,6 +243,7 @@ test("protects overlay text against light and dark camera frames and removes mot
     ".session-controls",
     ".session-status",
     ".system-status-trigger--overlay",
+    ".wordmark--overlay",
   ]) {
     const scrim = await page.locator(selector).evaluate((element) => {
       const match = getComputedStyle(element).backgroundColor.match(/[\d.]+/g);

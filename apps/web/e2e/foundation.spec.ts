@@ -304,7 +304,10 @@ test("shows a decoded mirrored contained synthetic-camera preview and stops it i
 
   await page.getByRole("button", { name: "Stop camera" }).click();
   await expect(
-    page.getByRole("heading", { name: "Camera stopped" }),
+    page.getByRole("heading", { name: "Camera is off" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Restart camera" }),
   ).toBeVisible();
   await expect
     .poll(() =>

@@ -291,7 +291,7 @@ export class CameraSession {
     this.attemptAbort = abort;
     this.clearWarmup();
     this.setSnapshot({
-      permission: "prompt",
+      permission: isSwitch ? this.snapshotValue.permission : "prompt",
       reason: undefined,
       state: isSwitch ? "camera-switching" : "permission-pending",
     });
@@ -310,23 +310,42 @@ export class CameraSession {
       return { epoch, outcome: "superseded" };
     }
     this.candidateStream = stream;
-    this.setSnapshot({
-      permission: "granted",
-      reason: undefined,
-      state: isSwitch ? "camera-switching" : "camera-starting",
-    });
+    const track = stream.getVideoTracks()[0];
+    let candidateEnded = false;
+    const onTrackEnded = () => {
+      if (stream === this.activeStream) {
+        this.handleTrackEnded(stream);
+        return;
+      }
+      if (stream !== this.candidateStream) return;
+      candidateEnded = true;
+      abort.abort();
+    };
+    track?.addEventListener("ended", onTrackEnded);
     try {
+      if (!track) throw { name: "NotFoundError" };
+      if (track.readyState !== "live") {
+        candidateEnded = true;
+        throw { name: "TrackEndedError" };
+      }
+      this.setSnapshot({
+        permission: "granted",
+        reason: undefined,
+        state: isSwitch ? "camera-switching" : "camera-starting",
+      });
       const decoded = await this.deps.attachAndPlay(stream, abort.signal);
       if (
         epoch !== this.requestEpoch ||
-        abort.signal.aborted ||
+        (abort.signal.aborted && !candidateEnded) ||
         this.candidateStream !== stream
       ) {
         stopTracks(stream);
         return { epoch, outcome: "superseded" };
       }
-      const track = stream.getVideoTracks()[0];
-      if (!track) throw { name: "NotFoundError" };
+      if (candidateEnded || track.readyState !== "live") {
+        candidateEnded = true;
+        throw { name: "TrackEndedError" };
+      }
       const settings = track.getSettings();
       if (
         expected &&
@@ -342,7 +361,6 @@ export class CameraSession {
       this.activeTrack = track;
       this.lastDeviceId = settings.deviceId;
       this.lastFacingMode = settings.facingMode;
-      track.addEventListener("ended", () => this.handleTrackEnded(stream));
       if (priorStream && priorStream !== stream) stopTracks(priorStream);
       this.snapshotValue = {
         ...this.snapshotValue,
@@ -366,10 +384,25 @@ export class CameraSession {
       return { epoch, outcome: "success" };
     } catch (error) {
       if (this.candidateStream === stream) this.candidateStream = undefined;
+      if (stream !== this.activeStream)
+        track?.removeEventListener("ended", onTrackEnded);
       stopTracks(stream);
       this.deps.detach?.();
-      if (epoch !== this.requestEpoch || abort.signal.aborted)
+      if (
+        epoch !== this.requestEpoch ||
+        (abort.signal.aborted && !candidateEnded)
+      )
         return { epoch, outcome: "superseded" };
+      if (candidateEnded) {
+        if (!isSwitch) {
+          this.setSnapshot({
+            permission: "granted",
+            reason: "interruption",
+            state: "recoverable-error",
+          });
+        }
+        return { epoch, outcome: "failed" };
+      }
       if (!isSwitch) this.setError(error);
       return { epoch, outcome: "failed" };
     } finally {
