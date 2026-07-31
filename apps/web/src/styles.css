@@ -12,6 +12,13 @@
   --guidance: #9a6400;
   --danger: #b42318;
   --focus: #6d5ce7;
+  --overlay-scrim: rgb(13 28 23 / 0.82);
+  --overlay-border: rgb(255 255 255 / 0.28);
+  --overlay-text: #ffffff;
+  --overlay-stop: rgb(105 30 30 / 0.92);
+  --overlay-stop-text: #ffe4e1;
+  --overlay-switch: #f7fffc;
+  --overlay-switch-text: #0b5f4b;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   color: var(--text-strong);
   background: var(--canvas);
@@ -32,6 +39,18 @@ button:focus-visible,
 a:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .app-shell {
@@ -543,6 +562,193 @@ h1 {
 @media (max-width: 560px) {
   .privacy-status {
     display: none;
+  }
+}
+
+.app-shell--camera-active {
+  position: relative;
+  display: block;
+  min-height: 100dvh;
+  padding: clamp(8px, 2vw, 16px);
+  background: var(--canvas);
+}
+
+.foundation-layout--camera-active {
+  display: block;
+  width: 100%;
+  height: calc(100dvh - clamp(16px, 4vw, 32px));
+  padding: 0;
+}
+
+.camera-stage--session {
+  width: min(100%, 1120px);
+  height: 100%;
+  min-height: 0;
+  margin-inline: auto;
+  border-radius: 24px;
+}
+
+.camera-stage--session .camera-preview {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+
+.camera-session-overlay {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: grid;
+  box-sizing: border-box;
+  grid-template-rows: auto 1fr auto;
+  color: var(--overlay-text);
+  pointer-events: none;
+}
+
+.session-chrome__top,
+.session-chrome__bottom {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+.session-chrome__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(16px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right)) 12px
+    max(16px, env(safe-area-inset-left));
+}
+
+.wordmark--overlay {
+  color: var(--overlay-text);
+  text-shadow: 0 2px 8px rgb(0 0 0 / 0.65);
+}
+
+.system-status-trigger--overlay {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin: 0;
+  padding: 0;
+  border-color: var(--overlay-border);
+  border-radius: 50%;
+  background: var(--overlay-scrim);
+  color: var(--overlay-text);
+  place-items: center;
+  backdrop-filter: blur(14px);
+}
+
+.system-status-trigger__icon {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.session-chrome__bottom {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 12px max(14px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+}
+
+.session-status {
+  display: flex;
+  min-height: 40px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 8px 14px;
+  border: 1px solid var(--overlay-border);
+  border-radius: 999px;
+  background: var(--overlay-scrim);
+  color: var(--overlay-text);
+  backdrop-filter: blur(14px);
+}
+
+.session-status h1 {
+  color: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.session-status__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #43d6a9;
+  box-shadow: 0 0 0 4px rgb(67 214 169 / 0.2);
+}
+
+.session-controls {
+  display: grid;
+  width: min(100%, 30rem);
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--overlay-border);
+  border-radius: 22px;
+  background: var(--overlay-scrim);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.3);
+  backdrop-filter: blur(16px);
+}
+
+.session-control {
+  display: inline-flex;
+  min-width: 48px;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 15px;
+  font-weight: 750;
+}
+
+.session-control--stop {
+  border: 1px solid rgb(255 170 170 / 0.55);
+  background: var(--overlay-stop);
+  color: var(--overlay-stop-text);
+}
+
+.session-control--switch {
+  border: 1px solid transparent;
+  background: var(--overlay-switch);
+  color: var(--overlay-switch-text);
+}
+
+.session-control--switch:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.session-control:focus-visible,
+.system-status-trigger--overlay:focus-visible {
+  outline-color: #a99cff;
+  box-shadow: 0 0 0 3px rgb(16 22 21 / 0.8);
+}
+
+@media (max-width: 767px) {
+  .app-shell--camera-active {
+    padding: 0;
+  }
+
+  .foundation-layout--camera-active {
+    height: 100dvh;
+  }
+
+  .camera-stage--session {
+    width: 100%;
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  .camera-stage--session .capture-zone {
+    width: min(58%, 14rem);
   }
 }
 

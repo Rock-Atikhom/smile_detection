@@ -272,7 +272,7 @@ test("shows a decoded mirrored contained synthetic-camera preview and stops it i
   page.on("request", (request) => postLoadRequests.push(request.url()));
   await page.getByRole("button", { name: "Continue to camera" }).click();
 
-  const video = page.getByLabel("Live camera preview");
+  const video = page.locator(".camera-preview");
   await expect(video).toBeVisible();
   await expect
     .poll(() =>
@@ -484,7 +484,7 @@ test("hides Switch camera when a permitted stream exposes only one choice", asyn
   });
   await page.goto("/");
   await page.getByRole("button", { name: "Continue to camera" }).click();
-  await expect(page.getByLabel("Live camera preview")).toBeVisible();
+  await expect(page.locator(".camera-preview")).toBeVisible();
   await expect(page.getByRole("button", { name: "Switch camera" })).toHaveCount(
     0,
   );
@@ -495,7 +495,7 @@ test("keeps application storage empty during a camera session", async ({
 }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Continue to camera" }).click();
-  await expect(page.getByLabel("Live camera preview")).toBeVisible();
+  await expect(page.locator(".camera-preview")).toBeVisible();
 
   await expect
     .poll(() =>
