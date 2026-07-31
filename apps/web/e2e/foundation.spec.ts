@@ -325,30 +325,40 @@ for (const viewport of viewports) {
     await page.setViewportSize(viewport);
     await page.goto("/");
     await page.getByRole("button", { name: "Continue to camera" }).click();
+    const overlay = page.getByRole("region", {
+      name: "Live camera controls",
+    });
+    await expect(overlay).toBeVisible();
+    await expect(overlay.getByRole("status")).toContainText(
+      /Getting ready|Camera ready/,
+    );
     await expect(
-      page.getByRole("button", { name: "Stop camera" }),
+      overlay.getByRole("button", { name: "Stop camera" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Help & system status" }),
+      overlay.getByRole("button", { name: "Help & system status" }),
     ).toBeVisible();
     for (const name of ["Stop camera", "Help & system status"]) {
-      const control = page.getByRole("button", { name });
+      const control = overlay.getByRole("button", { name });
       await control.scrollIntoViewIfNeeded();
       await expect(control).toBeInViewport();
       const box = await control.boundingBox();
       expect(box?.height).toBeGreaterThanOrEqual(48);
       expect(box?.width).toBeGreaterThanOrEqual(48);
     }
-    const keyboardTargets = new Set(["Stop camera", "Help & system status"]);
-    await page.getByRole("link", { name: "Smart Smile home" }).focus();
-    for (let step = 0; step < 8 && keyboardTargets.size > 0; step += 1) {
-      await page.keyboard.press("Tab");
-      const focusedText = await page.evaluate(
-        () => document.activeElement?.textContent?.trim() ?? "",
-      );
-      keyboardTargets.delete(focusedText);
+    const keyboardTargets = ["Help & system status", "Stop camera"];
+    if (
+      await overlay.getByRole("button", { name: "Switch camera" }).isVisible()
+    ) {
+      keyboardTargets.push("Switch camera");
     }
-    expect([...keyboardTargets]).toEqual([]);
+    await page.evaluate(() =>
+      (document.activeElement as HTMLElement | null)?.blur(),
+    );
+    for (const name of keyboardTargets) {
+      await page.keyboard.press("Tab");
+      await expect(overlay.getByRole("button", { name })).toBeFocused();
+    }
     await expect
       .poll(() =>
         page.evaluate(
