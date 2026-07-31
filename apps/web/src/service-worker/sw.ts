@@ -26,14 +26,37 @@ declare let self: ServiceWorkerGlobalScope & {
 const immutableVisionPaths = new Set(
   VISION_MANIFEST.assets.map((asset) => asset.path),
 );
-const activeCacheRequests = new Set<string>();
-const cancelledCacheRequests = new Set<string>();
+const activeCacheRequests = new Map<string, Map<string, number>>();
+const cancelledCacheRequestIds = new Set<string>();
 
 function cacheRequestKey(command: {
   generation: number;
   releaseId: string;
 }): string {
   return `${command.generation}:${command.releaseId}`;
+}
+
+function addActiveCacheRequest(key: string, requestId: string): void {
+  const requests = activeCacheRequests.get(key) ?? new Map<string, number>();
+  requests.set(requestId, (requests.get(requestId) ?? 0) + 1);
+  activeCacheRequests.set(key, requests);
+}
+
+function cancellationKey(key: string, requestId: string): string {
+  return `${key}:${requestId}`;
+}
+
+function removeActiveCacheRequest(key: string, requestId: string): void {
+  const requests = activeCacheRequests.get(key);
+  const count = requests?.get(requestId);
+  if (requests === undefined || count === undefined) return;
+  if (count > 1) {
+    requests.set(requestId, count - 1);
+    return;
+  }
+  requests.delete(requestId);
+  cancelledCacheRequestIds.delete(cancellationKey(key, requestId));
+  if (requests.size === 0) activeCacheRequests.delete(key);
 }
 
 function eventFor(
@@ -59,26 +82,31 @@ async function handleCacheCommand(
   switch (command.type) {
     case "CACHE_RELEASE": {
       const key = cacheRequestKey(command);
-      activeCacheRequests.add(key);
+      addActiveCacheRequest(key, command.requestId);
       postMessage(eventFor("CACHE_CACHING", command));
       try {
         await cacheVisionRelease(command, dependencies);
-        if (!cancelledCacheRequests.has(key)) {
+        if (
+          !cancelledCacheRequestIds.has(cancellationKey(key, command.requestId))
+        ) {
           postMessage(eventFor("CACHE_READY", command));
         }
       } catch {
-        if (!cancelledCacheRequests.has(key)) {
+        if (
+          !cancelledCacheRequestIds.has(cancellationKey(key, command.requestId))
+        ) {
           postMessage(eventFor("CACHE_ERROR", command));
         }
       } finally {
-        activeCacheRequests.delete(key);
-        cancelledCacheRequests.delete(key);
+        removeActiveCacheRequest(key, command.requestId);
       }
       return;
     }
     case "CANCEL_CACHE": {
       const key = cacheRequestKey(command);
-      if (activeCacheRequests.has(key)) cancelledCacheRequests.add(key);
+      for (const requestId of activeCacheRequests.get(key)?.keys() ?? []) {
+        cancelledCacheRequestIds.add(cancellationKey(key, requestId));
+      }
       cancelVisionRelease(command.generation);
       postMessage(eventFor("CACHE_CANCELLED", command));
       return;
@@ -102,6 +130,7 @@ async function handleCacheCommand(
 const dependencies: VisionCacheDependencies = {
   cacheStorage: self.caches,
   fetch: (input, init) => fetch(input, init),
+  manifest: VISION_MANIFEST,
   scope: self.registration.scope,
 };
 

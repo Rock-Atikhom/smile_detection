@@ -25,6 +25,16 @@ vi.mock("./vision-cache", async (importOriginal) => ({
 
 type Listener = (event: never) => void;
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 async function loadWorker() {
   const listeners = new Map<string, Listener>();
   const workerScope = {
@@ -120,6 +130,52 @@ describe("vision service worker", () => {
     expect(mocks.cancelVisionRelease).toHaveBeenCalledWith(4);
     expect(mocks.cancelVisionRelease).not.toHaveBeenCalledWith(3);
     expect(replies).toEqual([{ type: "CACHE_CANCELLED", ...base }]);
+  });
+
+  it("suppresses late replies from every duplicate active request after cancellation", async () => {
+    const first = deferred<"ready">();
+    const second = deferred<"ready">();
+    mocks.cacheVisionRelease
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const { listeners } = await loadWorker();
+    const listener = listeners.get("message")!;
+    const replies: VisionCacheEvent[] = [];
+    const work: Promise<unknown>[] = [];
+    const dispatch = (data: unknown) => {
+      listener({
+        data,
+        source: {
+          postMessage: (event: VisionCacheEvent) => replies.push(event),
+        },
+        waitUntil: (promise: Promise<unknown>) => work.push(promise),
+      } as never);
+    };
+
+    dispatch({
+      type: "CACHE_RELEASE",
+      ...base,
+      requestId: "duplicate-one",
+      manifestUrl: "/vision/release-manifest.json",
+    });
+    dispatch({
+      type: "CACHE_RELEASE",
+      ...base,
+      requestId: "duplicate-two",
+      manifestUrl: "/vision/release-manifest.json",
+    });
+    dispatch({ type: "CANCEL_CACHE", ...base, requestId: "cancel-both" });
+    await work[2];
+    first.resolve("ready");
+    await work[0];
+    second.reject(new Error("late private failure"));
+    await work[1];
+
+    expect(replies).toEqual([
+      { type: "CACHE_CACHING", ...base, requestId: "duplicate-one" },
+      { type: "CACHE_CACHING", ...base, requestId: "duplicate-two" },
+      { type: "CACHE_CANCELLED", ...base, requestId: "cancel-both" },
+    ]);
   });
 
   it("does not answer malformed messages", async () => {

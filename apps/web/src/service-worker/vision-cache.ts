@@ -1,5 +1,9 @@
 import { verifyVisionResponse } from "../vision/integrity";
-import { parseVisionManifest, type VisionAsset } from "../vision/manifest";
+import {
+  parseVisionManifest,
+  type VisionAsset,
+  type VisionReleaseManifest,
+} from "../vision/manifest";
 import type { VisionCacheCommand } from "../vision/protocol";
 
 export const visionCacheName = (releaseId: string) =>
@@ -13,6 +17,7 @@ export type CompletionRecord = {
 };
 
 export interface CacheLike {
+  delete(request: RequestInfo | URL): Promise<boolean>;
   match(request: RequestInfo | URL): Promise<Response | undefined>;
   put(request: RequestInfo | URL, response: Response): Promise<void>;
 }
@@ -25,6 +30,7 @@ export interface CacheStorageLike {
 export interface VisionCacheDependencies {
   cacheStorage: CacheStorageLike;
   fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  manifest: VisionReleaseManifest;
   scope: string;
   verifyResponse?: typeof verifyVisionResponse;
 }
@@ -35,11 +41,13 @@ type CacheReleaseCommand = Extract<
 >;
 
 const activeControllers = new Map<number, Set<AbortController>>();
+const releaseLocks = new Map<string, Promise<void>>();
 const SAFE_RESPONSE_HEADERS = ["content-type", "content-language"] as const;
 
 function isCompletionRecord(
   value: unknown,
   releaseId: string,
+  assetCount: number,
 ): value is CompletionRecord {
   if (
     typeof value !== "object" ||
@@ -65,24 +73,63 @@ function isCompletionRecord(
     record.schemaVersion === 1 &&
     record.releaseId === releaseId &&
     typeof record.assetCount === "number" &&
-    Number.isSafeInteger(record.assetCount) &&
-    record.assetCount > 0
+    record.assetCount === assetCount
   );
 }
 
 async function readCompletion(
   cache: CacheLike,
-  scope: string,
-  releaseId: string,
+  dependencies: VisionCacheDependencies,
 ): Promise<CompletionRecord | undefined> {
-  const response = await cache.match(completionUrl(scope, releaseId));
+  const requiredAssetCount = dependencies.manifest.assets.filter(
+    (asset) => asset.requiredForOffline,
+  ).length;
+  const response = await cache.match(
+    completionUrl(dependencies.scope, dependencies.manifest.releaseId),
+  );
   if (response === undefined || !response.ok) return undefined;
   try {
     const value: unknown = await response.json();
-    return isCompletionRecord(value, releaseId) ? value : undefined;
+    return isCompletionRecord(
+      value,
+      dependencies.manifest.releaseId,
+      requiredAssetCount,
+    )
+      ? value
+      : undefined;
   } catch {
     return undefined;
   }
+}
+
+function sameManifest(
+  actual: VisionReleaseManifest,
+  configured: VisionReleaseManifest,
+): boolean {
+  if (
+    actual.schemaVersion !== configured.schemaVersion ||
+    actual.releaseId !== configured.releaseId ||
+    actual.runtimeVersion !== configured.runtimeVersion ||
+    actual.modelVersion !== configured.modelVersion ||
+    actual.assets.length !== configured.assets.length
+  ) {
+    return false;
+  }
+  return actual.assets.every((asset, index) => {
+    const expected = configured.assets[index];
+    return (
+      expected !== undefined &&
+      asset.bytes === expected.bytes &&
+      asset.id === expected.id &&
+      asset.licenseRef === expected.licenseRef &&
+      asset.path === expected.path &&
+      asset.requiredForOffline === expected.requiredForOffline &&
+      asset.role === expected.role &&
+      asset.sha256 === expected.sha256 &&
+      asset.source === expected.source &&
+      asset.version === expected.version
+    );
+  });
 }
 
 function fetchOptions(signal: AbortSignal): RequestInit {
@@ -106,15 +153,6 @@ function ensureNotCancelled(signal: AbortSignal): void {
   }
 }
 
-function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.byteLength !== right.byteLength) return false;
-  let difference = 0;
-  for (let index = 0; index < left.byteLength; index += 1) {
-    difference |= left[index]! ^ right[index]!;
-  }
-  return difference === 0;
-}
-
 function addController(generation: number, controller: AbortController): void {
   const controllers = activeControllers.get(generation) ?? new Set();
   controllers.add(controller);
@@ -130,6 +168,28 @@ function removeController(
   if (controllers?.size === 0) activeControllers.delete(generation);
 }
 
+function acquireReleaseLock(releaseId: string): {
+  release(): void;
+  wait: Promise<void>;
+} {
+  const wait = (releaseLocks.get(releaseId) ?? Promise.resolve()).catch(
+    () => undefined,
+  );
+  let unlock!: () => void;
+  const held = new Promise<void>((resolve) => {
+    unlock = resolve;
+  });
+  const tail = wait.then(() => held);
+  releaseLocks.set(releaseId, tail);
+  return {
+    release() {
+      unlock();
+      if (releaseLocks.get(releaseId) === tail) releaseLocks.delete(releaseId);
+    },
+    wait,
+  };
+}
+
 async function fetchManifest(
   command: CacheReleaseCommand,
   dependencies: VisionCacheDependencies,
@@ -141,10 +201,43 @@ async function fetchManifest(
   );
   if (!response.ok) throw new Error("Vision manifest download failed");
   const parsed = parseVisionManifest(await response.json());
-  if (parsed.releaseId !== command.releaseId) {
-    throw new Error("Vision manifest release mismatch");
+  if (
+    parsed.releaseId !== command.releaseId ||
+    !sameManifest(parsed, dependencies.manifest)
+  ) {
+    throw new Error("Vision manifest inventory mismatch");
   }
   return parsed;
+}
+
+async function requiredEntriesAreVerified(
+  cache: CacheLike,
+  dependencies: VisionCacheDependencies,
+): Promise<boolean> {
+  try {
+    for (const asset of dependencies.manifest.assets) {
+      if (!asset.requiredForOffline) continue;
+      const cached = await cache.match(asset.path);
+      if (cached === undefined) return false;
+      await (dependencies.verifyResponse ?? verifyVisionResponse)(
+        cached,
+        asset,
+      );
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function completedCacheIsUsable(
+  cache: CacheLike,
+  dependencies: VisionCacheDependencies,
+): Promise<boolean> {
+  return (
+    (await readCompletion(cache, dependencies)) !== undefined &&
+    (await requiredEntriesAreVerified(cache, dependencies))
+  );
 }
 
 async function storeAsset(
@@ -169,45 +262,52 @@ async function storeAsset(
       status: 200,
     }),
   );
-  const readback = await cache.match(asset.path);
-  if (readback === undefined || !readback.ok) {
-    throw new Error("Vision cache readback failed");
-  }
-  const storedBytes = new Uint8Array(await readback.arrayBuffer());
-  if (!sameBytes(bytes, storedBytes)) {
-    throw new Error("Vision cache readback failed");
-  }
 }
 
 export async function queryVisionRelease(
   releaseId: string,
   dependencies: VisionCacheDependencies,
 ): Promise<"ready" | "missing"> {
+  if (releaseId !== dependencies.manifest.releaseId) return "missing";
   const cache = await dependencies.cacheStorage.open(
     visionCacheName(releaseId),
   );
-  return (await readCompletion(cache, dependencies.scope, releaseId)) ===
-    undefined
-    ? "missing"
-    : "ready";
+  return (await completedCacheIsUsable(cache, dependencies))
+    ? "ready"
+    : "missing";
 }
 
 export async function cacheVisionRelease(
   command: CacheReleaseCommand,
   dependencies: VisionCacheDependencies,
 ): Promise<"ready"> {
-  const cacheName = visionCacheName(command.releaseId);
-  const cache = await dependencies.cacheStorage.open(cacheName);
   if (
-    (await readCompletion(cache, dependencies.scope, command.releaseId)) !==
-    undefined
+    command.releaseId !== dependencies.manifest.releaseId ||
+    dependencies.manifest.assets.filter((asset) => asset.requiredForOffline)
+      .length === 0
   ) {
-    return "ready";
+    throw new Error("Vision manifest inventory mismatch");
   }
-
   const controller = new AbortController();
   addController(command.generation, controller);
+  const lock = acquireReleaseLock(command.releaseId);
+  const cacheName = visionCacheName(command.releaseId);
+  let cache: CacheLike | undefined;
+  let mutationStarted = false;
   try {
+    await lock.wait;
+    ensureNotCancelled(controller.signal);
+    cache = await dependencies.cacheStorage.open(cacheName);
+    if (await completedCacheIsUsable(cache, dependencies)) {
+      ensureNotCancelled(controller.signal);
+      return "ready";
+    }
+
+    ensureNotCancelled(controller.signal);
+    mutationStarted = true;
+    const marker = completionUrl(dependencies.scope, command.releaseId);
+    if ((await cache.match(marker)) !== undefined) await cache.delete(marker);
+
     const release = await fetchManifest(
       command,
       dependencies,
@@ -217,10 +317,14 @@ export async function cacheVisionRelease(
       await storeAsset(cache, asset, dependencies, controller.signal);
     }
     ensureNotCancelled(controller.signal);
+    if (!(await requiredEntriesAreVerified(cache, dependencies))) {
+      throw new Error("Vision cache readback failed");
+    }
     const completion: CompletionRecord = {
       schemaVersion: 1,
       releaseId: command.releaseId,
-      assetCount: release.assets.length,
+      assetCount: release.assets.filter((asset) => asset.requiredForOffline)
+        .length,
     };
     await cache.put(
       completionUrl(dependencies.scope, command.releaseId),
@@ -229,13 +333,15 @@ export async function cacheVisionRelease(
     return "ready";
   } catch (error) {
     if (
-      (await readCompletion(cache, dependencies.scope, command.releaseId)) ===
-      undefined
+      mutationStarted &&
+      cache !== undefined &&
+      !(await completedCacheIsUsable(cache, dependencies))
     ) {
       await dependencies.cacheStorage.delete(cacheName);
     }
     throw error;
   } finally {
+    lock.release();
     removeController(command.generation, controller);
   }
 }
@@ -253,12 +359,11 @@ export async function matchCompletedVisionAsset(
   releaseId: string,
   dependencies: VisionCacheDependencies,
 ): Promise<Response | undefined> {
+  if (releaseId !== dependencies.manifest.releaseId) return undefined;
   const cache = await dependencies.cacheStorage.open(
     visionCacheName(releaseId),
   );
-  if (
-    (await readCompletion(cache, dependencies.scope, releaseId)) === undefined
-  ) {
+  if (!(await completedCacheIsUsable(cache, dependencies))) {
     return undefined;
   }
   return cache.match(request);

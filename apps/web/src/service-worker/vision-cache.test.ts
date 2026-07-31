@@ -4,6 +4,7 @@ import {
   cacheVisionRelease,
   cancelVisionRelease,
   completionUrl,
+  matchCompletedVisionAsset,
   queryVisionRelease,
   visionCacheName,
   type CacheLike,
@@ -67,6 +68,16 @@ function requestKey(request: RequestInfo | URL): string {
   return request.url;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 class MemoryCache implements CacheLike {
   readonly entries = new Map<string, Response>();
 
@@ -74,6 +85,10 @@ class MemoryCache implements CacheLike {
     private readonly operations: string[],
     private readonly failReadbackFor?: string,
   ) {}
+
+  async delete(request: RequestInfo | URL): Promise<boolean> {
+    return this.entries.delete(requestKey(request));
+  }
 
   async match(request: RequestInfo | URL): Promise<Response | undefined> {
     const key = requestKey(request);
@@ -122,6 +137,7 @@ class MemoryCacheStorage implements CacheStorageLike {
 
 function harness(options?: {
   assets?: VisionAsset[];
+  downloadedManifest?: VisionReleaseManifest;
   failFetchFor?: string;
   failReadbackFor?: string;
   verificationFailureFor?: string;
@@ -140,7 +156,7 @@ function harness(options?: {
           cache: "no-store",
           credentials: "same-origin",
         });
-        return Response.json(releaseManifest);
+        return Response.json(options?.downloadedManifest ?? releaseManifest);
       }
       operations.push(`fetch:${path}`);
       expect(init).toMatchObject({
@@ -158,6 +174,7 @@ function harness(options?: {
         headers: {
           "content-type": "application/octet-stream",
           "set-cookie": "participant=private",
+          "x-test-upstream": "yes",
           "x-session-id": "private",
         },
       });
@@ -165,14 +182,20 @@ function harness(options?: {
   );
   const verifyResponse: VisionCacheDependencies["verifyResponse"] = vi.fn(
     async (response, expectedAsset) => {
-      operations.push(`verify:${expectedAsset.id}`);
+      if (response.headers.get("x-test-upstream") === "yes") {
+        operations.push(`verify:${expectedAsset.id}`);
+      }
       if (
         !response.ok ||
         expectedAsset.path === options?.verificationFailureFor
       ) {
         throw new Error("verification failed");
       }
-      return new Uint8Array(await response.arrayBuffer());
+      const actual = new Uint8Array(await response.arrayBuffer());
+      expect(Array.from(actual)).toEqual(
+        Array.from(bytesByPath.get(expectedAsset.path)!),
+      );
+      return actual;
     },
   );
   return {
@@ -180,6 +203,7 @@ function harness(options?: {
     dependencies: {
       cacheStorage,
       fetch,
+      manifest: releaseManifest,
       scope,
       verifyResponse,
     } satisfies VisionCacheDependencies,
@@ -202,8 +226,15 @@ async function seedCompletion(
   storage: MemoryCacheStorage,
   completedReleaseId: string,
   assetCount = 1,
+  cachedAssets: VisionAsset[] = [],
 ) {
   const cache = await storage.open(visionCacheName(completedReleaseId));
+  for (const expectedAsset of cachedAssets) {
+    const bytes = bytesByPath.get(expectedAsset.path)!;
+    const body = new Uint8Array(bytes.byteLength);
+    body.set(bytes);
+    cache.entries.set(expectedAsset.path, new Response(body.buffer));
+  }
   await cache.put(
     completionUrl(scope, completedReleaseId),
     Response.json({
@@ -296,9 +327,75 @@ describe("vision release cache transaction", () => {
     expect(other.cacheStorage.deleted).toEqual([]);
   });
 
-  it("recognizes only an exact matching completion record", async () => {
+  it("serializes overlapping generations so one failure cannot orphan its successor", async () => {
+    const { cacheStorage, dependencies } = harness();
+    const originalFetch = dependencies.fetch;
+    const firstAssetFetch = deferred<Response>();
+    const firstStarted = deferred<void>();
+    let assetFetches = 0;
+    dependencies.fetch = vi.fn(async (input, init) => {
+      if (requestKey(input) === manifestUrl) return originalFetch(input, init);
+      assetFetches += 1;
+      if (assetFetches === 1) {
+        firstStarted.resolve();
+        return firstAssetFetch.promise;
+      }
+      return originalFetch(input, init);
+    });
+
+    const failing = cacheVisionRelease(command(10), dependencies);
+    await firstStarted.promise;
+    const succeeding = cacheVisionRelease(command(11), dependencies);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(assetFetches).toBe(1);
+    cancelVisionRelease(10);
+    firstAssetFetch.reject(new DOMException("cancelled", "AbortError"));
+
+    await expect(failing).rejects.toThrow();
+    await expect(succeeding).resolves.toBe("ready");
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "ready",
+    );
+    expect(cacheStorage.caches.has(visionCacheName(releaseId))).toBe(true);
+  });
+
+  it("a queued cancelled generation cannot delete a completed cache", async () => {
+    const { cacheStorage, dependencies } = harness();
+    const originalFetch = dependencies.fetch;
+    const firstAssetFetch = deferred<Response>();
+    const firstStarted = deferred<void>();
+    dependencies.fetch = vi.fn(async (input, init) => {
+      if (requestKey(input) === manifestUrl) return originalFetch(input, init);
+      firstStarted.resolve();
+      return firstAssetFetch.promise;
+    });
+
+    const completing = cacheVisionRelease(command(20), dependencies);
+    await firstStarted.promise;
+    const cancelled = cacheVisionRelease(command(21), dependencies);
+    cancelVisionRelease(21);
+    const bytes = bytesByPath.get(firstAsset.path)!;
+    const body = new Uint8Array(bytes.byteLength);
+    body.set(bytes);
+    firstAssetFetch.resolve(
+      new Response(body.buffer, { headers: { "x-test-upstream": "yes" } }),
+    );
+
+    await expect(completing).resolves.toBe("ready");
+    await expect(cancelled).rejects.toThrow();
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "ready",
+    );
+    expect(cacheStorage.deleted).toEqual([]);
+  });
+
+  it("recognizes only a matching marker backed by every verified required entry", async () => {
     const { cacheStorage, dependencies, fetch, operations } = harness();
-    const cache = await seedCompletion(cacheStorage, releaseId);
+    const cache = await seedCompletion(cacheStorage, releaseId, 1, [
+      firstAsset,
+    ]);
     operations.length = 0;
 
     await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
@@ -320,6 +417,76 @@ describe("vision release cache transaction", () => {
     await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
       "missing",
     );
+  });
+
+  it.each([
+    ["marker only", [firstAsset], 1, []],
+    ["wrong asset count", [firstAsset], 2, [firstAsset]],
+    ["missing required entry", [firstAsset, secondAsset], 2, [firstAsset]],
+    ["corrupt required entry", [firstAsset], 1, [firstAsset]],
+  ] as const)(
+    "treats a %s completion as missing and repairs it",
+    async (condition, configuredAssets, assetCount, cachedAssets) => {
+      const { cacheStorage, dependencies, fetch } = harness({
+        assets: [...configuredAssets],
+      });
+      const cache = await seedCompletion(cacheStorage, releaseId, assetCount, [
+        ...cachedAssets,
+      ]);
+      if (condition === "corrupt required entry") {
+        cache.entries.set(firstAsset.path, new Response("corrupt"));
+      }
+
+      await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+        "missing",
+      );
+      await expect(cacheVisionRelease(command(), dependencies)).resolves.toBe(
+        "ready",
+      );
+      expect(fetch).toHaveBeenCalled();
+      await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+        "ready",
+      );
+    },
+  );
+
+  it("serves an immutable entry only when the full completed inventory verifies", async () => {
+    const { cacheStorage, dependencies } = harness({
+      assets: [firstAsset, secondAsset],
+    });
+    const cache = await seedCompletion(cacheStorage, releaseId, 2, [
+      firstAsset,
+    ]);
+
+    await expect(
+      matchCompletedVisionAsset(firstAsset.path, releaseId, dependencies),
+    ).resolves.toBeUndefined();
+
+    const secondBytes = bytesByPath.get(secondAsset.path)!;
+    const secondBody = new Uint8Array(secondBytes.byteLength);
+    secondBody.set(secondBytes);
+    cache.entries.set(secondAsset.path, new Response(secondBody.buffer));
+    const response = await matchCompletedVisionAsset(
+      firstAsset.path,
+      releaseId,
+      dependencies,
+    );
+    await expect(response?.text()).resolves.toBe("license");
+  });
+
+  it("rejects an altered inventory that reuses the configured release ID", async () => {
+    const alteredAsset = {
+      ...firstAsset,
+      source: "https://altered.example.test/license",
+    };
+    const { cacheStorage, dependencies } = harness({
+      downloadedManifest: manifest([alteredAsset]),
+    });
+
+    await expect(cacheVisionRelease(command(), dependencies)).rejects.toThrow(
+      "Vision manifest inventory mismatch",
+    );
+    expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
   });
 
   it("stores no upstream participant/session headers or non-cache data", async () => {

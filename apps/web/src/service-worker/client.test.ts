@@ -10,7 +10,9 @@ class FakeServiceWorkerContainer {
   readonly posted: VisionCacheCommand[] = [];
   readonly register = vi.fn(async () => ({ installing: {} }));
   readonly worker = {
-    postMessage: (command: VisionCacheCommand) => this.posted.push(command),
+    postMessage: vi.fn((command: VisionCacheCommand) =>
+      this.posted.push(command),
+    ),
   };
   readonly ready = Promise.resolve({ active: this.worker });
 
@@ -21,9 +23,9 @@ class FakeServiceWorkerContainer {
     this.listeners.add(listener);
   }
 
-  dispatch(data: VisionCacheEvent | unknown) {
+  dispatch(data: VisionCacheEvent | unknown, source: unknown = this.worker) {
     for (const listener of this.listeners) {
-      listener({ data } as MessageEvent<unknown>);
+      listener({ data, source } as MessageEvent<unknown>);
     }
   }
 }
@@ -94,6 +96,31 @@ describe("VisionCacheClient", () => {
     });
 
     await expect(pending).resolves.toBe("missing");
+  });
+
+  it("accepts a matching reply only from the selected active worker", async () => {
+    const serviceWorker = new FakeServiceWorkerContainer();
+    const client = await registerApplicationServiceWorker({ serviceWorker });
+    const pending = client.queryRelease({ generation: 3, releaseId });
+    const sent = serviceWorker.posted[0]!;
+    const matchingReply = {
+      type: "CACHE_READY",
+      requestId: sent.requestId,
+      generation: 3,
+      releaseId,
+    } as const;
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+
+    serviceWorker.dispatch(matchingReply, { postMessage: vi.fn() });
+    serviceWorker.dispatch(matchingReply, null);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    serviceWorker.dispatch(matchingReply);
+    await expect(pending).resolves.toBe("ready");
   });
 
   it("reports caching and ready states for an explicit cache request", async () => {
@@ -171,5 +198,27 @@ describe("VisionCacheClient", () => {
     ).resolves.toBe("missing");
     expect(states).toEqual(["error"]);
     expect(serviceWorker.posted).toEqual([]);
+  });
+
+  it("cleans pending state and degrades safely when postMessage throws", async () => {
+    vi.useFakeTimers();
+    const serviceWorker = new FakeServiceWorkerContainer();
+    serviceWorker.worker.postMessage.mockImplementation(() => {
+      throw new Error("private post failure");
+    });
+    const client = await registerApplicationServiceWorker({ serviceWorker });
+    const states: Array<"caching" | "ready" | "error"> = [];
+
+    await expect(
+      client.cacheRelease({ generation: 4, manifestUrl, releaseId }, (state) =>
+        states.push(state),
+      ),
+    ).resolves.toBe("error");
+    await expect(
+      client.queryRelease({ generation: 4, releaseId }),
+    ).resolves.toBe("missing");
+    expect(() => client.cancel({ generation: 4, releaseId })).not.toThrow();
+    expect(states).toEqual(["error"]);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

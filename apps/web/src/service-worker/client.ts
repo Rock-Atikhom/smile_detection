@@ -76,6 +76,11 @@ function createVisionCacheClient(
   const pending = new Map<string, PendingRequest>();
 
   container.addEventListener("message", (messageEvent) => {
+    if (
+      messageEvent.source !== (serviceWorker as unknown as MessageEventSource)
+    ) {
+      return;
+    }
     if (!isVisionCacheEvent(messageEvent.data)) return;
     const event = messageEvent.data;
     const request = pending.get(event.requestId);
@@ -92,8 +97,13 @@ function createVisionCacheClient(
     }
   });
 
-  function post(command: VisionCacheCommand): void {
-    serviceWorker.postMessage(command);
+  function post(command: VisionCacheCommand): boolean {
+    try {
+      serviceWorker.postMessage(command);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   return {
@@ -129,7 +139,11 @@ function createVisionCacheClient(
             }
           },
         });
-        post({ type: "CACHE_RELEASE", requestId, ...request });
+        if (!post({ type: "CACHE_RELEASE", requestId, ...request })) {
+          clearTimeout(timeout);
+          pending.delete(requestId);
+          fail();
+        }
       });
     },
     cancel(request) {
@@ -162,7 +176,11 @@ function createVisionCacheClient(
             return false;
           },
         });
-        post({ type: "QUERY_RELEASE", requestId, ...request });
+        if (!post({ type: "QUERY_RELEASE", requestId, ...request })) {
+          clearTimeout(timeout);
+          pending.delete(requestId);
+          resolve("missing");
+        }
       });
     },
   };
