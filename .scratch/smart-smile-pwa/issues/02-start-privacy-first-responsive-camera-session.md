@@ -1,4 +1,4 @@
-Status: mobile switch correction implemented — phone switch retest pending before UX work
+Status: phone camera and one-tap switching passed — approved overlay UX ready for implementation planning
 Execution: agent-led, with human UX review
 
 # 02 — Start a privacy-first responsive camera session
@@ -32,7 +32,7 @@ A participant understands the privacy boundary, grants camera permission through
 - [x] Component/a11y tests for privacy, permission, warm-up, and recovery states.
 - [x] Playwright synthetic-camera preview in Chromium.
 - [x] Manual preview review on this MacBook (passed 2026-07-31).
-- [ ] Manual preview review on one phone before completion.
+- [x] Manual preview review on one phone (camera preview and one-tap switch passed 2026-07-31).
 - [x] Network assertion that camera sessions emit no application data.
 
 ## Blocked by
@@ -140,3 +140,9 @@ multiple physical camera IDs, and cycling those IDs could select another lens on
 same side before reaching the opposite camera. Mobile now ignores physical-device
 cycling and performs one semantic facing-mode toggle per action: user to environment,
 then environment to user. UX/UI remains unchanged in this correction.
+
+The subsequent phone review passed one-tap switching. The user then selected and
+approved a Native Camera Overlay redesign for the active session: full-stage contained
+preview, protected status, always-visible Stop and Switch camera controls, and Help as
+the entry to diagnostics. The approved design is documented in
+[`docs/plans/2026-07-31-native-camera-overlay-design.md`](../../../docs/plans/2026-07-31-native-camera-overlay-design.md).

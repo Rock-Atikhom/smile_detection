@@ -2,6 +2,18 @@ Status: approved
 
 # Smart Smile Responsive UX Specification
 
+## Ticket 02 active-session amendment
+
+The user subsequently selected and approved the
+[Native Camera Overlay design](../../docs/plans/2026-07-31-native-camera-overlay-design.md)
+for the camera-only Ticket 02 active session. Until smile guidance and capture are
+implemented, the live phone experience uses a full-stage contained preview with
+protected semantic status, Stop, Switch camera, and Help over the camera surface.
+Status remains real DOM text and never exists only in a canvas overlay.
+
+The broader coach, verification, capture, and review guidance below continues to govern
+the future inference-and-capture experience.
+
 ## 1. Interface decision
 
 Three intentionally different concepts were compared:
