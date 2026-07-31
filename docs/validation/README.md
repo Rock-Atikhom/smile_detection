@@ -12,6 +12,12 @@ application requests, and empty IndexedDB, local/session storage, Cache
 Storage, service-worker registrations, and script-visible cookies. The Python reference retains its
 locked 38-test, Ruff, and strict mypy gates.
 
+The active-session Native Camera Overlay is additionally checked at 390x844,
+844x390, 768x1024, 1440x900, and the 360x225 400-percent reflow equivalent.
+The checks cover semantic status, Help/Stop/Switch focus order, 48-pixel targets,
+full-stage portrait geometry, short-height normal-flow fallback, reduced motion,
+and scrim contrast against representative black and white camera frames.
+
 Real-device preview assessment remains a human-only acceptance check: review this MacBook and one
 phone before marking the criterion complete.
 

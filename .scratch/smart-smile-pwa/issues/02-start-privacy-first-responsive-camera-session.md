@@ -1,4 +1,4 @@
-Status: phone camera and one-tap switching passed — approved overlay UX ready for implementation planning
+Status: Native Camera Overlay implemented and automated — final phone visual review pending
 Execution: agent-led, with human UX review
 
 # 02 — Start a privacy-first responsive camera session
@@ -146,3 +146,21 @@ approved a Native Camera Overlay redesign for the active session: full-stage con
 preview, protected status, always-visible Stop and Switch camera controls, and Help as
 the entry to diagnostics. The approved design is documented in
 [`docs/plans/2026-07-31-native-camera-overlay-design.md`](../../../docs/plans/2026-07-31-native-camera-overlay-design.md).
+
+## Native Camera Overlay implementation
+
+The approved active-session design is implemented as presentation-only React and CSS.
+Camera ownership, one-tap mobile facing-mode toggling, generation, warm-up,
+interruption recovery, diagnostics allowlisting, and privacy behavior remain owned by
+the existing camera session.
+
+Automated acceptance covers semantic status and controls, busy switching, portrait,
+landscape, tablet, desktop, 200/400 percent reflow equivalents, safe-area padding,
+focus order, touch targets, reduced motion, scrim contrast, zero application camera
+traffic, and empty browser storage. The final implementation remains pending one human
+phone visual review of the new overlay before Ticket 02 is closed.
+
+The final human review covers phone portrait and landscape, one-tap
+front/rear/front switching, bright and dark camera scenes, Stop/Restart/Help,
+one-handed touch comfort, VoiceOver or TalkBack announcements, and MacBook keyboard
+behavior.
