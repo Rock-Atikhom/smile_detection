@@ -168,10 +168,17 @@ describe("prepareVisionRuntime", () => {
     expect(createLandmarker).not.toHaveBeenCalled();
   });
 
-  it("retries baseline exactly once when SIMD construction fails", async () => {
+  it.each([
+    ["WebAssembly CompileError", new WebAssembly.CompileError("unsupported")],
+    ["WebAssembly LinkError", new WebAssembly.LinkError("unsupported")],
+    [
+      "NotSupportedError DOMException",
+      new DOMException("unsupported", "NotSupportedError"),
+    ],
+  ])("retries baseline exactly once for %s", async (_name, failure) => {
     const { createLandmarker, dependencies } = await createDependencies();
     createLandmarker
-      .mockRejectedValueOnce(new Error("SIMD unavailable"))
+      .mockRejectedValueOnce(failure)
       .mockResolvedValueOnce({ close: vi.fn() });
 
     const result = await prepare(dependencies);
@@ -224,15 +231,32 @@ describe("prepareVisionRuntime", () => {
     await expect(prepare(dependencies)).rejects.not.toThrow("private URL");
   });
 
-  it("maps exhausted construction attempts to a safe initialization error", async () => {
+  it.each([
+    ["plain Error", new Error("private upstream details")],
+    ["network-like TypeError", new TypeError("network failed")],
+    ["unknown value", { name: "CompileError" }],
+  ])("does not retry baseline for %s", async (_name, failure) => {
     const { createLandmarker, dependencies } = await createDependencies();
-    createLandmarker.mockRejectedValue(new Error("private upstream details"));
+    createLandmarker.mockRejectedValue(failure);
     const pending = prepare(dependencies);
 
     await expect(pending).rejects.toEqual(
       expect.objectContaining({ code: "runtime-initialization-failed" }),
     );
-    await expect(pending).rejects.not.toThrow("private upstream details");
+    expect(createLandmarker).toHaveBeenCalledOnce();
+  });
+
+  it("stops after baseline fails following an allowlisted SIMD failure", async () => {
+    const { createLandmarker, dependencies } = await createDependencies();
+    createLandmarker
+      .mockRejectedValueOnce(new WebAssembly.CompileError("unsupported"))
+      .mockRejectedValueOnce(new Error("private baseline details"));
+    const pending = prepare(dependencies);
+
+    await expect(pending).rejects.toEqual(
+      expect.objectContaining({ code: "runtime-initialization-failed" }),
+    );
+    await expect(pending).rejects.not.toThrow("private baseline details");
     expect(createLandmarker).toHaveBeenCalledTimes(2);
   });
 

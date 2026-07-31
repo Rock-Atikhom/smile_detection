@@ -81,6 +81,14 @@ function closeLandmarker(landmarker: Pick<FaceLandmarker, "close">): void {
   }
 }
 
+function isUnsupportedSimdRuntimeError(error: unknown): boolean {
+  return (
+    error instanceof WebAssembly.CompileError ||
+    error instanceof WebAssembly.LinkError ||
+    (error instanceof DOMException && error.name === "NotSupportedError")
+  );
+}
+
 async function fetchResponse(
   url: string,
   signal: AbortSignal,
@@ -257,6 +265,9 @@ export async function prepareVisionRuntime(
         throw error;
       }
       throwIfCancelled(input.signal);
+      if (!isUnsupportedSimdRuntimeError(error)) {
+        throw new VisionRuntimeError("runtime-initialization-failed");
+      }
     }
     input.onPhase("verifying");
   }
