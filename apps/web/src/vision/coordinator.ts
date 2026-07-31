@@ -120,8 +120,9 @@ export class VisionCoordinator {
   async restart(): Promise<StartResult> {
     if (this.disposed) return "first-use-offline";
     this.invalidateCurrent();
+    const generation = this.nextGeneration();
     this.publish({
-      generation: this.nextGeneration(),
+      generation,
       offlineCache:
         this.snapshotValue.offlineCache === "ready" ? "ready" : "not-ready",
       phase: null,
@@ -130,6 +131,7 @@ export class VisionCoordinator {
       runtime: "idle",
       wasmTier: "unknown",
     });
+    if (!this.ownsGeneration(generation)) return "first-use-offline";
     return this.prepare();
   }
 
@@ -210,8 +212,9 @@ export class VisionCoordinator {
       return "first-use-offline";
     }
 
-    this.startPreparation(active.generation, cacheReady);
-    return "started";
+    return this.startPreparation(active.generation, cacheReady)
+      ? "started"
+      : "first-use-offline";
   }
 
   private isCurrentPreflight(active: ActivePreflight): boolean {
@@ -223,18 +226,21 @@ export class VisionCoordinator {
     );
   }
 
-  private startPreparation(generation: number, cacheReady: boolean): void {
+  private startPreparation(generation: number, cacheReady: boolean): boolean {
     let worker: VisionWorkerPort;
     try {
       worker = this.dependencies.createWorker();
     } catch {
       this.publish({
+        offlineCache: cacheReady ? "ready" : "caching",
         runtime: "error",
         phase: null,
         reason: "runtime-initialization-failed",
         retryAvailable: true,
       });
-      return;
+      if (!this.ownsGeneration(generation)) return false;
+      this.startCacheLane(generation);
+      return this.ownsGeneration(generation);
     }
 
     const active: ActiveWorker = {
@@ -253,6 +259,7 @@ export class VisionCoordinator {
       runtime: "preparing",
       wasmTier: "unknown",
     });
+    if (!this.ownsWorker(active)) return false;
 
     try {
       worker.postMessage({
@@ -271,6 +278,13 @@ export class VisionCoordinator {
       });
     }
 
+    if (!this.ownsGeneration(generation)) return false;
+    this.startCacheLane(generation);
+    return this.ownsGeneration(generation);
+  }
+
+  private startCacheLane(generation: number): void {
+    if (!this.ownsGeneration(generation)) return;
     this.activeCacheGeneration = generation;
     this.cacheStartedGeneration = generation;
     let cachePromise: Promise<"ready" | "error">;
@@ -290,6 +304,16 @@ export class VisionCoordinator {
     void cachePromise
       .then((result) => this.receiveCacheState(generation, result))
       .catch(() => this.receiveCacheState(generation, "error"));
+  }
+
+  private ownsGeneration(generation: number): boolean {
+    return !this.disposed && this.snapshotValue.generation === generation;
+  }
+
+  private ownsWorker(active: ActiveWorker): boolean {
+    return (
+      this.ownsGeneration(active.generation) && this.activeWorker === active
+    );
   }
 
   private receiveWorkerEvent(active: ActiveWorker, value: unknown): void {
@@ -328,9 +352,11 @@ export class VisionCoordinator {
     active.settled = true;
     if (value.code === "runtime-integrity-failed") {
       this.cancelActiveCache(active.generation);
-      this.publish({ offlineCache: "error" });
     }
     this.publish({
+      ...(value.code === "runtime-integrity-failed"
+        ? { offlineCache: "error" as const }
+        : {}),
       phase: null,
       reason: value.code,
       retryAvailable:

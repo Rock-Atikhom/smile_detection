@@ -252,6 +252,153 @@ describe("VisionCoordinator", () => {
     expect(harness.workers[0]!.terminate).not.toHaveBeenCalled();
   });
 
+  it("keeps a verified cache ready when worker construction fails", async () => {
+    const cache = createCache();
+    cache.queryResult = "ready";
+    const createWorker = vi.fn(() => {
+      throw new Error("private worker construction failure");
+    });
+    const harness = createHarness({
+      cacheClient: cache.client,
+      createWorker,
+    });
+
+    await expect(harness.coordinator.prepare()).resolves.toBe("started");
+
+    expect(harness.snapshot()).toMatchObject({
+      runtime: "error",
+      offlineCache: "ready",
+      wasmTier: "unknown",
+      reason: "runtime-initialization-failed",
+      retryAvailable: true,
+      phase: null,
+    });
+    expect(cache.client.cacheRelease).toHaveBeenCalledOnce();
+    expect(JSON.stringify(harness.snapshot())).not.toContain("private");
+  });
+
+  it.each([
+    ["ready", "ready"],
+    ["error", "error"],
+  ] as const)(
+    "settles first online cache population as %s when worker construction fails",
+    async (cacheState, expectedOfflineCache) => {
+      const cache = createCache();
+      const harness = createHarness({
+        cacheClient: cache.client,
+        createWorker: vi.fn(() => {
+          throw new Error("private worker construction failure");
+        }),
+      });
+
+      await expect(harness.coordinator.prepare()).resolves.toBe("started");
+      expect(harness.snapshot()).toMatchObject({
+        runtime: "error",
+        offlineCache: "caching",
+        reason: "runtime-initialization-failed",
+      });
+      expect(cache.client.cacheRelease).toHaveBeenCalledOnce();
+
+      cache.cacheState?.(cacheState);
+      expect(harness.snapshot()).toMatchObject({
+        runtime: "error",
+        offlineCache: expectedOfflineCache,
+        reason: "runtime-initialization-failed",
+        retryAvailable: true,
+      });
+    },
+  );
+
+  it("does not start stale preparation when a subscriber cancels its notification", async () => {
+    const cache = createCache();
+    const harness = createHarness({ cacheClient: cache.client });
+    let cancelled = false;
+    harness.coordinator.subscribe((snapshot) => {
+      if (!cancelled && snapshot.runtime === "preparing") {
+        cancelled = true;
+        harness.coordinator.cancel();
+      }
+    });
+
+    await expect(harness.coordinator.prepare()).resolves.toBe(
+      "first-use-offline",
+    );
+
+    expect(harness.workers[0]!.messages).not.toContainEqual(
+      expect.objectContaining({ type: "PREPARE", generation: 0 }),
+    );
+    expect(cache.client.cacheRelease).not.toHaveBeenCalled();
+    expect(harness.workers[0]!.terminate).toHaveBeenCalledOnce();
+    expect(harness.snapshot()).toMatchObject({
+      generation: 1,
+      runtime: "idle",
+      reason: "runtime-cancelled",
+    });
+  });
+
+  it("starts only the new generation when a subscriber restarts its notification", async () => {
+    const cache = createCache();
+    const harness = createHarness({ cacheClient: cache.client });
+    let restarted = false;
+    let restartResult: Promise<"started" | "first-use-offline"> | undefined;
+    harness.coordinator.subscribe((snapshot) => {
+      if (!restarted && snapshot.runtime === "preparing") {
+        restarted = true;
+        restartResult = harness.coordinator.restart();
+      }
+    });
+
+    await expect(harness.coordinator.prepare()).resolves.toBe(
+      "first-use-offline",
+    );
+    await expect(restartResult).resolves.toBe("started");
+
+    expect(harness.workers).toHaveLength(2);
+    expect(harness.workers[0]!.messages).toEqual([
+      { type: "CANCEL", generation: 0 },
+    ]);
+    expect(harness.workers[0]!.terminate).toHaveBeenCalledOnce();
+    expect(harness.workers[1]!.messages).toEqual([
+      {
+        type: "PREPARE",
+        generation: 1,
+        manifestUrl: VISION_MANIFEST_URL,
+        releaseId: VISION_MANIFEST.releaseId,
+      },
+    ]);
+    expect(cache.client.cacheRelease).toHaveBeenCalledOnce();
+    expect(cache.client.cacheRelease).toHaveBeenCalledWith(
+      expect.objectContaining({ generation: 1 }),
+      expect.any(Function),
+    );
+  });
+
+  it("starts no stale work when a subscriber disposes its notification", async () => {
+    const cache = createCache();
+    const harness = createHarness({ cacheClient: cache.client });
+    let disposed = false;
+    harness.coordinator.subscribe((snapshot) => {
+      if (!disposed && snapshot.runtime === "preparing") {
+        disposed = true;
+        harness.coordinator.dispose();
+      }
+    });
+
+    await expect(harness.coordinator.prepare()).resolves.toBe(
+      "first-use-offline",
+    );
+
+    expect(harness.workers[0]!.messages).toEqual([
+      { type: "CANCEL", generation: 0 },
+    ]);
+    expect(harness.workers[0]!.terminate).toHaveBeenCalledOnce();
+    expect(cache.client.cacheRelease).not.toHaveBeenCalled();
+    expect(harness.coordinator.snapshot).toMatchObject({
+      generation: 1,
+      runtime: "idle",
+    });
+  });
+
   it("keeps a ready runtime usable after a cache-only failure", async () => {
     const harness = createHarness();
     await harness.coordinator.prepare();
