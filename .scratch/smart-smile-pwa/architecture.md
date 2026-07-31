@@ -261,6 +261,10 @@ Camera request:
 - mobile prefers user-facing;
 - desktop omits facingMode unless a prior in-session choice exists.
 
+An interruption restart or participant Stop then Start preserves the last delivered in-session
+camera choice. If that remembered exact device is missing or overconstrained, one browser-default
+request is used as the explicit fallback so recovery cannot loop on an unavailable camera.
+
 Delivered track settings and decoded video dimensions are authoritative. A minimum decoded frame of 640 by 480 is required for automatic capture unless release validation approves an equivalent portrait resolution.
 
 Permission is requested only after the privacy-introduction action. The app maps NotAllowed, NotFound, NotReadable, Overconstrained, Abort, and inactive-document failures to stable user guidance.
@@ -273,6 +277,15 @@ Camera switch algorithm:
 4. stop the old track;
 5. warm up the new stream;
 6. restore the previous stream or offer recovery when switching fails.
+
+On mobile, the facing-mode control remains available when device enumeration exposes
+only the active camera. Mobile switching releases the active track before requesting
+the replacement because some phone browsers cannot grant concurrent camera ownership.
+It toggles `facingMode` directly between `user` and `environment` rather than cycling
+physical device IDs, because a phone can expose several lenses for the same direction.
+Desktop switching retains candidate-first validation. If a released mobile replacement
+fails, the session publishes interruption recovery and never claims that the ended
+preview remains active.
 
 Tab hiding stops inference and may stop the camera after a short policy delay. A returned page never reuses earlier evidence.
 
