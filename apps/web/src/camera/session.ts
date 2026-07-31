@@ -206,6 +206,10 @@ export class CameraSession {
       this.activeStream !== oldStream
     )
       return;
+    if (oldTrack?.readyState === "ended") {
+      this.publishInterruption();
+      return;
+    }
 
     const restoreAbort = new AbortController();
     this.attemptAbort = restoreAbort;
@@ -443,6 +447,9 @@ export class CameraSession {
   private handleTrackEnded(stream: MediaStream) {
     if (stream !== this.activeStream) return;
     if (stream === this.switchingFromStream) return;
+    this.publishInterruption();
+  }
+  private publishInterruption() {
     this.invalidateInFlightAndOwned();
     // A stopped track cannot produce a valid result, so invalidate the public
     // generation before publishing the interruption state.

@@ -8,9 +8,10 @@ import {
 } from "./session";
 
 type FakeTrack = EventTarget & {
-  stop: ReturnType<typeof vi.fn>;
   getCapabilities: () => MediaTrackCapabilities;
   getSettings: () => MediaTrackSettings;
+  readyState: MediaStreamTrackState;
+  stop: ReturnType<typeof vi.fn>;
 };
 
 function makeTrack(
@@ -23,7 +24,13 @@ function makeTrack(
   } = {},
 ): FakeTrack {
   const track = new EventTarget() as FakeTrack;
-  track.stop = vi.fn();
+  track.readyState = "live";
+  track.stop = vi.fn(() => {
+    track.readyState = "ended";
+  });
+  track.addEventListener("ended", () => {
+    track.readyState = "ended";
+  });
   track.getCapabilities = () =>
     ({
       facingMode: options.facingModes ?? [options.facingMode ?? "user"],
@@ -482,6 +489,35 @@ describe("camera session lifecycle", () => {
       facingMode: "environment",
       generation: 2,
       state: "warm-up",
+    });
+  });
+
+  it("reports interruption when the prior mobile track ends and its switch candidate fails", async () => {
+    const firstTrack = makeTrack({
+      facingMode: "user",
+      facingModes: ["user", "environment"],
+    });
+    const restore = vi.fn(() => Promise.resolve());
+    const { session } = createHarness({
+      getUserMedia: vi
+        .fn()
+        .mockResolvedValueOnce(makeStream(firstTrack))
+        .mockImplementationOnce(() => {
+          firstTrack.dispatchEvent(new Event("ended"));
+          return Promise.reject({ name: "NotReadableError" });
+        }),
+      mobile: true,
+      restore,
+    });
+
+    await session.start();
+    await session.switchCamera();
+
+    expect(restore).not.toHaveBeenCalled();
+    expect(session.snapshot).toMatchObject({
+      generation: 2,
+      reason: "interruption",
+      state: "recoverable-error",
     });
   });
 
