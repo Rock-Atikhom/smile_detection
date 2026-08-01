@@ -58,6 +58,8 @@ applies it to every path. It keeps scripts, styles, and connections self-only, u
 subresource requests through CSP, blocks objects and framing, allows the camera only for this
 origin, disables the microphone, omits referrers, prevents MIME sniffing, and enables HSTS.
 
+### Ticket 03 runtime CSP
+
 Ticket 03 uses only the minimum proven expansion for the self-hosted runtime:
 `worker-src 'self'` permits the bundled classic worker from this origin and
 continues to reject `blob:` and `data:` workers. `script-src 'self'

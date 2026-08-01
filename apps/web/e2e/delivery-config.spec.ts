@@ -98,6 +98,62 @@ function expectDocumentedClause(document: string, clause: string) {
   );
 }
 
+const documentationContradictions = [
+  /\b(?:(?:Ticket 03|the runtime|it) (?:uses|enables|selects|creates|runs in) (?:a )?module worker|(?:a )?module worker (?:is|may be|can be) (?:used|enabled|selected))\b/i,
+  /\b(?:(?:Ticket 03|the runtime|it) (?:uses|enables|selects|chooses) WebGPU|WebGPU (?:is|may be|can be) (?:enabled|selected|used))\b/i,
+  /\b(?:(?:Ticket 03|the runtime|the service worker|it) (?:writes|stores|caches) (?:camera frames|participant data) (?:in|to) Cache Storage|(?:camera frames|participant data) (?:are|may be|can be) (?:written|stored|cached) (?:in|to) Cache Storage)\b/i,
+  /\b(?:(?:Ticket 03|the runtime|it) (?:uses|enables|selects|allows) (?:a )?(?:remote|CDN)(?:-hosted)? runtime|(?:remote|CDN)(?:-hosted)? runtime (?:is|may be|can be) (?:enabled|selected|used|allowed))\b/i,
+  /\b(?:Ticket 03|the runtime|it) (?:detects smiles|(?:uses|performs|implements|enables|includes|delivers) smile detection)\b/i,
+];
+
+function hasDocumentationContradiction(document: string) {
+  const normalized = normalizeDocumentation(document);
+  return documentationContradictions.some((contradiction) =>
+    contradiction.test(normalized),
+  );
+}
+
+function extractMarkdownSection(document: string, expectedHeading: string) {
+  const lines = document.replace(/\r\n?/g, "\n").split("\n");
+  const headingPattern = /^[\t ]{0,3}(#{1,6})[\t ]+(.+?)[\t ]*#*[\t ]*$/;
+  const expected = normalizeDocumentation(expectedHeading);
+  let start = -1;
+  let level = 0;
+
+  for (const [index, line] of lines.entries()) {
+    const match = headingPattern.exec(line);
+    if (match && normalizeDocumentation(match[2]!) === expected) {
+      start = index;
+      level = match[1]!.length;
+      break;
+    }
+  }
+
+  if (start < 0) {
+    throw new Error(`Missing documentation heading: ${expectedHeading}`);
+  }
+
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const match = headingPattern.exec(lines[index]!);
+    if (match && match[1]!.length <= level) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+function ticket03SectionsHaveContradiction(
+  sections: Array<{ document: string; heading: string }>,
+) {
+  return hasDocumentationContradiction(
+    sections
+      .map(({ document, heading }) => extractMarkdownSection(document, heading))
+      .join("\n"),
+  );
+}
+
 test("keeps the empty shared-contracts workspace boundary", () => {
   expect(rootPackage.workspaces).toContain("packages/*");
   expect(contractsPackage.name).toBe("@smart-smile/contracts");
@@ -313,21 +369,81 @@ test("tracks the exact CSP, acceptance, and provenance clauses", () => {
 });
 
 test("rejects contradictory Ticket 03 documentation", () => {
-  const documentedBoundary = normalizeDocumentation(
-    [rootReadme, architecture, privacy, validation, deployment, notices].join(
-      "\n",
-    ),
-  );
+  expect(
+    ticket03SectionsHaveContradiction([
+      { document: rootReadme, heading: "Offline vision runtime" },
+      {
+        document: architecture,
+        heading: "Ticket 03 offline vision runtime boundary",
+      },
+      {
+        document: privacy,
+        heading: "Ticket 03 static-runtime storage boundary",
+      },
+      { document: validation, heading: "Ticket 03 runtime validation" },
+      { document: deployment, heading: "Ticket 03 runtime CSP" },
+      {
+        document: notices,
+        heading: "MediaPipe Tasks Vision and Face Landmarker release",
+      },
+    ]),
+  ).toBe(false);
+});
+
+test("rejects direct affirmative contradictions inside Ticket 03", () => {
   for (const contradiction of [
-    /\b(?:(?:uses|runs in|creates) (?:a )?module worker|(?:a )?module worker (?:is|may be|can be) (?:used|enabled|selected))\b/i,
-    /\b(?:WebGPU (?:is|may be|can be) (?:enabled|selected|used)|(?:Ticket 03|the runtime) enables WebGPU)\b/i,
-    /\bCamera frames (?:are|may be|can be) (?:written|stored|cached) (?:in|to) Cache Storage\b/i,
-    /\bparticipant data (?:is|may be|can be) (?:written|stored|cached) (?:in|to) Cache Storage\b/i,
-    /\b(?:remote|CDN) runtime (?:is|may be|can be) (?:enabled|selected|used|allowed)\b/i,
-    /\bTicket 03 (?:detects smiles|(?:performs|implements|enables|includes|delivers) smile detection)\b/i,
+    "Ticket 03 uses a module worker.",
+    "Ticket 03 uses WebGPU.",
+    "Ticket 03 caches camera frames in Cache Storage.",
+    "Ticket 03 caches participant data in Cache Storage.",
+    "Ticket 03 uses a remote runtime from a CDN.",
+    "Ticket 03 uses smile detection.",
   ]) {
-    expect(documentedBoundary).not.toMatch(contradiction);
+    expect
+      .soft(
+        ticket03SectionsHaveContradiction([
+          {
+            document: [
+              "## Ticket 03 boundary",
+              "",
+              contradiction,
+              "",
+              "## Ticket 04 boundary",
+              "",
+              "Ticket 04 may make a different architecture decision.",
+            ].join("\n"),
+            heading: "Ticket 03 boundary",
+          },
+        ]),
+        contradiction,
+      )
+      .toBe(true);
   }
+});
+
+test("allows future-ticket architecture outside the Ticket 03 section", () => {
+  const futureDocumentation = [
+    "## Ticket 03 offline vision runtime boundary",
+    "",
+    "Ticket 03 uses a dedicated classic worker and never chooses WebGPU.",
+    "",
+    "### Ticket 03 detail",
+    "",
+    "This nested subsection remains part of Ticket 03.",
+    "",
+    "## Ticket 04 frame processing",
+    "",
+    "Ticket 04 uses a module worker and WebGPU.",
+  ].join("\n");
+
+  expect(
+    ticket03SectionsHaveContradiction([
+      {
+        document: futureDocumentation,
+        heading: "Ticket 03 offline vision runtime boundary",
+      },
+    ]),
+  ).toBe(false);
 });
 
 test("keeps Cloudflare deployment downstream of the complete web gate", () => {
