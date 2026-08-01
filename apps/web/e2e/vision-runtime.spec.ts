@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIResponse, type Page } from "@playwright/test";
 
 type ReleaseManifest = {
   assets: Array<{ path: string; requiredForOffline: boolean }>;
@@ -25,6 +25,9 @@ const shellPaths = [
   .sort();
 const currentCacheName = `smart-smile-vision-${releaseManifest.releaseId}`;
 const corruptWasmCookieName = "__smart_smile_e2e_corrupt_wasm";
+const simdWasmPath = releaseManifest.assets.find(({ path }) =>
+  path.endsWith("/vision_wasm_internal.wasm"),
+)!.path;
 const completionPath = (releaseId: string) =>
   `/__smart-smile/vision-complete/${releaseId}`;
 const forbiddenPersistence =
@@ -56,12 +59,23 @@ async function setCorruptWasm(page: Page, enabled: boolean) {
 
 async function controlCorruptWasmBarrier(
   page: Page,
-  action: "hold" | "release",
+  action: "drain" | "hold" | "release",
+  holdTimeoutMs?: number,
 ) {
   const response = await page.request.get(
-    `/__e2e__/fault/corrupt-wasm/${action}`,
+    `/__e2e__/fault/corrupt-wasm/${action}${
+      action === "hold" && holdTimeoutMs !== undefined
+        ? `?timeout=${holdTimeoutMs}`
+        : ""
+    }`,
   );
   expect(response.status()).toBe(204);
+}
+
+async function corruptWasmBarrierStatus(page: Page) {
+  const response = await page.request.get("/__e2e__/fault/corrupt-wasm/status");
+  expect(response.status()).toBe(200);
+  return (await response.json()) as { held: boolean; pendingResponses: number };
 }
 
 async function waitForShellWorker(page: Page) {
@@ -279,9 +293,6 @@ test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
     await page.goto("/");
     await setCorruptWasm(page, true);
     expect(await cleanContext.cookies()).toEqual([]);
-    const simdWasmPath = releaseManifest.assets.find(({ path }) =>
-      path.endsWith("/vision_wasm_internal.wasm"),
-    )!.path;
     const [corruptResponse, pristineResponse] = await Promise.all([
       page.request.get(simdWasmPath),
       cleanContext.request.get(simdWasmPath),
@@ -297,21 +308,42 @@ test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
     expect(corruptBytes.at(-1)).toBe(pristineBytes.at(-1)! ^ 1);
     await page.getByRole("button", { name: "Continue to camera" }).click();
 
-    const heading = page.getByRole("heading", {
+    const recovery = page.locator(".coach-card--recovery");
+    const heading = recovery.getByRole("heading", {
       name: "Smart Smile could not start safely",
     });
     await expect(heading).toBeVisible({ timeout: 60_000 });
     await expect(heading).toBeFocused();
-    const recovery = page.locator(".coach-card--recovery");
     expect((await recovery.innerText()).replace(/\s+/g, " ").trim()).toBe(
       "PRIVATE BY DESIGN Smart Smile could not start safely The required files could not be verified. Reload Smart Smile before using the camera. Camera status: Smart Smile could not start safely. Reload View help You can open Help & system status for a read-only session summary. Help & system status",
     );
+    const interactiveControls = recovery.locator(
+      'button, a[href], input:not([type="hidden"]), select, textarea, [contenteditable="true"], [role="button"], [role="link"]',
+    );
+    await expect(interactiveControls).toHaveCount(3);
+    const recoveryButtons = recovery.getByRole("button");
+    await expect(recoveryButtons).toHaveCount(3);
+    expect(
+      await recoveryButtons.evaluateAll((buttons) =>
+        buttons.map((button) => button.textContent?.trim()),
+      ),
+    ).toEqual(["Reload", "View help", "Help & system status"]);
+    for (const name of ["Reload", "View help", "Help & system status"]) {
+      await expect(
+        recovery.getByRole("button", { exact: true, name }),
+      ).toHaveCount(1);
+    }
+    const primaryRecoveryActions = recovery.locator(
+      ":scope > .camera-actions > button",
+    );
+    await expect(primaryRecoveryActions).toHaveCount(2);
+    expect(await primaryRecoveryActions.allInnerTexts()).toEqual([
+      "Reload",
+      "View help",
+    ]);
     await expect(
-      recovery.getByRole("button", { name: "Reload" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Help & system status" }),
-    ).toBeVisible();
+      recovery.locator(":scope > button.system-status-trigger"),
+    ).toHaveCount(1);
     await expect(
       page.getByRole("status", { name: "Camera status" }),
     ).not.toContainText("Smart Smile is ready for offline use");
@@ -508,6 +540,72 @@ test("rolls back a corrupt current release while retaining a completed sentinel"
         } finally {
           await context.close();
         }
+      }
+    }
+  }
+});
+
+test("auto-releases an abandoned held corrupt response", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  let pendingResponse: Promise<APIResponse> | undefined;
+  try {
+    await page.goto("/");
+    await setCorruptWasm(page, true);
+    await controlCorruptWasmBarrier(page, "hold", 1_000);
+    pendingResponse = page.request.get(simdWasmPath);
+    await expect
+      .poll(() => corruptWasmBarrierStatus(page))
+      .toEqual({ held: true, pendingResponses: 1 });
+    expect((await pendingResponse).status()).toBe(200);
+    await expect
+      .poll(() => corruptWasmBarrierStatus(page))
+      .toEqual({ held: false, pendingResponses: 0 });
+  } finally {
+    try {
+      await controlCorruptWasmBarrier(page, "release");
+      await pendingResponse?.catch(() => undefined);
+    } finally {
+      try {
+        await setCorruptWasm(page, false);
+      } finally {
+        await context.close();
+      }
+    }
+  }
+});
+
+test("drains held corrupt responses through the shutdown cleanup path", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  let pendingResponse: Promise<APIResponse> | undefined;
+  try {
+    await page.goto("/");
+    await setCorruptWasm(page, true);
+    await controlCorruptWasmBarrier(page, "hold");
+    pendingResponse = page.request.get(simdWasmPath);
+    await expect
+      .poll(() => corruptWasmBarrierStatus(page))
+      .toEqual({ held: true, pendingResponses: 1 });
+    await controlCorruptWasmBarrier(page, "drain");
+    expect((await pendingResponse).status()).toBe(200);
+    await expect(corruptWasmBarrierStatus(page)).resolves.toEqual({
+      held: false,
+      pendingResponses: 0,
+    });
+  } finally {
+    try {
+      await controlCorruptWasmBarrier(page, "release");
+      await pendingResponse?.catch(() => undefined);
+    } finally {
+      try {
+        await setCorruptWasm(page, false);
+      } finally {
+        await context.close();
       }
     }
   }

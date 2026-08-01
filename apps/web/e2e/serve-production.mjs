@@ -29,7 +29,9 @@ const contentTypes = new Map([
   [".wasm", "application/wasm"],
 ]);
 const corruptWasmCookieName = "__smart_smile_e2e_corrupt_wasm";
+const defaultFaultHoldTimeoutMs = 10_000;
 const heldFaultScopes = new Set();
+const heldFaultTimers = new Map();
 const pendingFaultResponses = new Map();
 let faultScopeSequence = 0;
 
@@ -46,8 +48,31 @@ function faultScope(request) {
 function releaseFaultScope(scope) {
   if (scope === undefined) return;
   heldFaultScopes.delete(scope);
-  for (const send of pendingFaultResponses.get(scope) ?? []) send();
+  const timer = heldFaultTimers.get(scope);
+  if (timer !== undefined) clearTimeout(timer);
+  heldFaultTimers.delete(scope);
+  const pending = pendingFaultResponses.get(scope) ?? [];
   pendingFaultResponses.delete(scope);
+  for (const send of pending) send();
+}
+
+function holdFaultScope(scope, timeoutMs = defaultFaultHoldTimeoutMs) {
+  if (scope === undefined) return;
+  const previousTimer = heldFaultTimers.get(scope);
+  if (previousTimer !== undefined) clearTimeout(previousTimer);
+  heldFaultScopes.add(scope);
+  const timer = setTimeout(() => releaseFaultScope(scope), timeoutMs);
+  timer.unref();
+  heldFaultTimers.set(scope, timer);
+}
+
+function drainFaultScopes() {
+  const scopes = new Set([
+    ...heldFaultScopes,
+    ...heldFaultTimers.keys(),
+    ...pendingFaultResponses.keys(),
+  ]);
+  for (const scope of scopes) releaseFaultScope(scope);
 }
 
 function sendCorruptResponse(scope, response, bytes) {
@@ -64,13 +89,13 @@ function sendCorruptResponse(scope, response, bytes) {
   response.on("close", () => {
     if (response.writableEnded) return;
     pending.delete(send);
-    if (pending.size === 0) pendingFaultResponses.delete(scope);
+    if (pending.size === 0) releaseFaultScope(scope);
   });
 }
 
 const server = createServer((request, response) => {
-  const pathname = new URL(request.url ?? "/", `http://${host}:${port}`)
-    .pathname;
+  const requestUrl = new URL(request.url ?? "/", `http://${host}:${port}`);
+  const pathname = requestUrl.pathname;
   if (pathname === "/__e2e__/fault/corrupt-wasm/on") {
     releaseFaultScope(faultScope(request));
     faultScopeSequence += 1;
@@ -84,14 +109,43 @@ const server = createServer((request, response) => {
     return;
   }
   if (pathname === "/__e2e__/fault/corrupt-wasm/hold") {
-    const scope = faultScope(request);
-    if (scope !== undefined) heldFaultScopes.add(scope);
+    const requestedTimeout = Number(requestUrl.searchParams.get("timeout"));
+    const timeoutMs =
+      Number.isInteger(requestedTimeout) &&
+      requestedTimeout >= 100 &&
+      requestedTimeout <= defaultFaultHoldTimeoutMs
+        ? requestedTimeout
+        : defaultFaultHoldTimeoutMs;
+    holdFaultScope(faultScope(request), timeoutMs);
     response.writeHead(204, { "Cache-Control": "no-store" }).end();
     return;
   }
   if (pathname === "/__e2e__/fault/corrupt-wasm/release") {
     releaseFaultScope(faultScope(request));
     response.writeHead(204, { "Cache-Control": "no-store" }).end();
+    return;
+  }
+  if (pathname === "/__e2e__/fault/corrupt-wasm/drain") {
+    drainFaultScopes();
+    response.writeHead(204, { "Cache-Control": "no-store" }).end();
+    return;
+  }
+  if (pathname === "/__e2e__/fault/corrupt-wasm/status") {
+    const scope = faultScope(request);
+    response
+      .writeHead(200, {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json; charset=utf-8",
+      })
+      .end(
+        JSON.stringify({
+          held: scope !== undefined && heldFaultScopes.has(scope),
+          pendingResponses:
+            scope === undefined
+              ? 0
+              : (pendingFaultResponses.get(scope)?.size ?? 0),
+        }),
+      );
     return;
   }
   if (pathname === "/__e2e__/fault/corrupt-wasm/off") {
@@ -141,5 +195,8 @@ server.listen(port, host, () => {
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => server.close(() => process.exit(0)));
+  process.on(signal, () => {
+    drainFaultScopes();
+    server.close(() => process.exit(0));
+  });
 }
