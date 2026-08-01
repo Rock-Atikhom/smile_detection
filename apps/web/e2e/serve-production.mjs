@@ -29,27 +29,73 @@ const contentTypes = new Map([
   [".wasm", "application/wasm"],
 ]);
 const corruptWasmCookieName = "__smart_smile_e2e_corrupt_wasm";
-const corruptWasmDelayMs = 250;
+const heldFaultScopes = new Set();
+const pendingFaultResponses = new Map();
+let faultScopeSequence = 0;
 
-function hasCorruptWasmCookie(request) {
-  return (request.headers.cookie ?? "")
-    .split(";")
-    .some((cookie) => cookie.trim() === `${corruptWasmCookieName}=1`);
+function faultScope(request) {
+  for (const cookie of (request.headers.cookie ?? "").split(";")) {
+    const [name, ...value] = cookie.trim().split("=");
+    if (name !== corruptWasmCookieName) continue;
+    const scope = value.join("=");
+    return /^fault-[a-z0-9]+$/.test(scope) ? scope : undefined;
+  }
+  return undefined;
+}
+
+function releaseFaultScope(scope) {
+  if (scope === undefined) return;
+  heldFaultScopes.delete(scope);
+  for (const send of pendingFaultResponses.get(scope) ?? []) send();
+  pendingFaultResponses.delete(scope);
+}
+
+function sendCorruptResponse(scope, response, bytes) {
+  const send = () => {
+    if (!response.destroyed) response.end(bytes);
+  };
+  if (!heldFaultScopes.has(scope)) {
+    send();
+    return;
+  }
+  const pending = pendingFaultResponses.get(scope) ?? new Set();
+  pending.add(send);
+  pendingFaultResponses.set(scope, pending);
+  response.on("close", () => {
+    if (response.writableEnded) return;
+    pending.delete(send);
+    if (pending.size === 0) pendingFaultResponses.delete(scope);
+  });
 }
 
 const server = createServer((request, response) => {
   const pathname = new URL(request.url ?? "/", `http://${host}:${port}`)
     .pathname;
   if (pathname === "/__e2e__/fault/corrupt-wasm/on") {
+    releaseFaultScope(faultScope(request));
+    faultScopeSequence += 1;
+    const scope = `fault-${faultScopeSequence.toString(36)}`;
     response
       .writeHead(204, {
         "Cache-Control": "no-store",
-        "Set-Cookie": `${corruptWasmCookieName}=1; Path=/; HttpOnly; SameSite=Strict`,
+        "Set-Cookie": `${corruptWasmCookieName}=${scope}; Path=/; HttpOnly; SameSite=Strict`,
       })
       .end();
     return;
   }
+  if (pathname === "/__e2e__/fault/corrupt-wasm/hold") {
+    const scope = faultScope(request);
+    if (scope !== undefined) heldFaultScopes.add(scope);
+    response.writeHead(204, { "Cache-Control": "no-store" }).end();
+    return;
+  }
+  if (pathname === "/__e2e__/fault/corrupt-wasm/release") {
+    releaseFaultScope(faultScope(request));
+    response.writeHead(204, { "Cache-Control": "no-store" }).end();
+    return;
+  }
   if (pathname === "/__e2e__/fault/corrupt-wasm/off") {
+    releaseFaultScope(faultScope(request));
     response
       .writeHead(204, {
         "Cache-Control": "no-store",
@@ -78,10 +124,11 @@ const server = createServer((request, response) => {
     ...headers,
     "Content-Type": contentTypes.get(extension) ?? "application/octet-stream",
   });
-  if (hasCorruptWasmCookie(request) && extension === ".wasm") {
+  const requestFaultScope = faultScope(request);
+  if (requestFaultScope !== undefined && extension === ".wasm") {
     const bytes = Buffer.from(readFileSync(filePath));
     if (bytes.length > 0) bytes[bytes.length - 1] ^= 1;
-    setTimeout(() => response.end(bytes), corruptWasmDelayMs);
+    sendCorruptResponse(requestFaultScope, response, bytes);
     return;
   }
   createReadStream(filePath).pipe(response);

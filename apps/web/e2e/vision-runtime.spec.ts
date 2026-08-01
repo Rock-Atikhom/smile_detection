@@ -46,12 +46,22 @@ async function setCorruptWasm(page: Page, enabled: boolean) {
         httpOnly: true,
         name: corruptWasmCookieName,
         sameSite: "Strict",
-        value: "1",
+        value: expect.stringMatching(/^fault-[a-z0-9]+$/),
       }),
     ]);
   } else {
     expect(faultCookies).toEqual([]);
   }
+}
+
+async function controlCorruptWasmBarrier(
+  page: Page,
+  action: "hold" | "release",
+) {
+  const response = await page.request.get(
+    `/__e2e__/fault/corrupt-wasm/${action}`,
+  );
+  expect(response.status()).toBe(204);
 }
 
 async function waitForShellWorker(page: Page) {
@@ -293,8 +303,8 @@ test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
     await expect(heading).toBeVisible({ timeout: 60_000 });
     await expect(heading).toBeFocused();
     const recovery = page.locator(".coach-card--recovery");
-    await expect(recovery).toContainText(
-      "The required files could not be verified. Reload Smart Smile before using the camera.",
+    expect((await recovery.innerText()).replace(/\s+/g, " ").trim()).toBe(
+      "PRIVATE BY DESIGN Smart Smile could not start safely The required files could not be verified. Reload Smart Smile before using the camera. Camera status: Smart Smile could not start safely. Reload View help You can open Help & system status for a read-only session summary. Help & system status",
     );
     await expect(
       recovery.getByRole("button", { name: "Reload" }),
@@ -328,7 +338,7 @@ test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
       requestedPaths.filter((path) => baselinePaths.includes(path)),
     ).toEqual([]);
     await expect(page.locator("body")).not.toContainText(
-      /TypeError|CompileError|RuntimeError|WebAssembly|\bintegrity(?:\.[cm]?[jt]s)?\b|runtime-integrity-failed|(?:^|\n)\s*at\s+\S+|https?:\/\/|\/vision\/|\S+\.wasm\b/im,
+      /TypeError|CompileError|LinkError|DOMException|RuntimeError|\bError\b|failed to fetch|verification (?:failed|error)|verifyVisionResponse|WebAssembly|\bstack\b|\b(?:worker-runtime|runtime-loader|integrity)\.[cm]?[jt]s\b|runtime-integrity-failed|(?:^|\n)\s*at\s+\S+|https?:\/\/|file:\/\/|blob:|data:|[a-z]:\\|\/(?:vision|src|apps|Users)\/|\S+\.wasm\b/im,
     );
     await expect
       .poll(() =>
@@ -396,6 +406,7 @@ test("rolls back a corrupt current release while retaining a completed sentinel"
       },
     );
     await setCorruptWasm(page, true);
+    await controlCorruptWasmBarrier(page, "hold");
     await page.getByRole("button", { name: "Continue to camera" }).click();
     await expect
       .poll(() =>
@@ -416,6 +427,7 @@ test("rolls back a corrupt current release while retaining a completed sentinel"
         ),
       )
       .toBe(true);
+    await controlCorruptWasmBarrier(page, "release");
     await expect(
       page.getByRole("heading", {
         name: "Smart Smile could not start safely",
@@ -474,19 +486,29 @@ test("rolls back a corrupt current release while retaining a completed sentinel"
       });
   } finally {
     try {
-      await setCorruptWasm(page, false);
-      expect(await context.cookies()).toEqual([]);
+      await controlCorruptWasmBarrier(page, "release");
     } finally {
-      if (!page.isClosed()) {
-        await page.evaluate(
-          async ({ currentName, sentinelName }) => {
-            await caches.delete(currentName);
-            await caches.delete(sentinelName);
-          },
-          { currentName: currentCacheName, sentinelName: sentinelCacheName },
-        );
+      try {
+        await setCorruptWasm(page, false);
+        expect(await context.cookies()).toEqual([]);
+      } finally {
+        try {
+          if (!page.isClosed()) {
+            await page.evaluate(
+              async ({ currentName, sentinelName }) => {
+                await caches.delete(currentName);
+                await caches.delete(sentinelName);
+              },
+              {
+                currentName: currentCacheName,
+                sentinelName: sentinelCacheName,
+              },
+            );
+          }
+        } finally {
+          await context.close();
+        }
       }
-      await context.close();
     }
   }
 });
