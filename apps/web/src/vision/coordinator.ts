@@ -473,13 +473,28 @@ function deferredCacheClient(
   };
 }
 
+const NETWORK_PROBE_PARAMETER = "__vision_network_probe";
+let networkProbeSequence = 0;
+
+function createNetworkProbeUrl(manifestUrl: string): URL | undefined {
+  const url = new URL(manifestUrl, window.location.href);
+  if (url.origin !== window.location.origin) return undefined;
+  url.searchParams.set(
+    NETWORK_PROBE_PARAMETER,
+    `${Date.now()}-${++networkProbeSequence}`,
+  );
+  return url;
+}
+
 export function createBrowserVisionCoordinator(): VisionCoordinator {
   const cacheClient = deferredCacheClient(registerApplicationServiceWorker());
   return new VisionCoordinator({
     cacheClient,
     canFetchManifest: async (manifestUrl, signal) => {
       try {
-        const response = await fetch(manifestUrl, {
+        const probeUrl = createNetworkProbeUrl(manifestUrl);
+        if (probeUrl === undefined) return false;
+        const response = await fetch(probeUrl, {
           cache: "no-store",
           credentials: "same-origin",
           signal,

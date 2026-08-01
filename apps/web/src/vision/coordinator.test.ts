@@ -625,6 +625,46 @@ describe("VisionCoordinator", () => {
     expect(harness.workers[0]!.terminate).not.toHaveBeenCalled();
   });
 
+  it("does not treat the shell-precached manifest as network reachability", async () => {
+    const shellManifestUrl = new URL(VISION_MANIFEST_URL, location.href);
+    const fetchManifest = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        void init;
+        const requestedUrl = new URL(String(input), location.href);
+        if (requestedUrl.href === shellManifestUrl.href) {
+          return new Response("shell-cached manifest", { status: 200 });
+        }
+        throw new TypeError("network unavailable");
+      },
+    );
+    const WorkerConstructor = vi.fn(() => new FakeWorker());
+    vi.stubGlobal("fetch", fetchManifest);
+    vi.stubGlobal("Worker", WorkerConstructor);
+    const coordinator = createBrowserVisionCoordinator();
+
+    await expect(coordinator.prepare()).resolves.toBe("first-use-offline");
+
+    expect(fetchManifest).toHaveBeenCalledOnce();
+    const [probeInput, probeInit] = fetchManifest.mock.calls[0]!;
+    const probeUrl = new URL(String(probeInput), location.href);
+    expect(probeUrl.origin).toBe(shellManifestUrl.origin);
+    expect(probeUrl.pathname).toBe(shellManifestUrl.pathname);
+    expect(probeUrl.searchParams.has("__vision_network_probe")).toBe(true);
+    expect(probeInit).toMatchObject({
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: expect.any(AbortSignal),
+    });
+    expect(WorkerConstructor).not.toHaveBeenCalled();
+    expect(coordinator.snapshot).toMatchObject({
+      runtime: "error",
+      offlineCache: "not-ready",
+      reason: "first-use-offline",
+      retryAvailable: true,
+    });
+    coordinator.dispose();
+  });
+
   it("disposes listeners and owned work once and ignores late replies", async () => {
     const harness = createHarness();
     await harness.coordinator.prepare();
