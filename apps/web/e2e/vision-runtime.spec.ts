@@ -1,10 +1,5 @@
 import { readFileSync } from "node:fs";
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 type ReleaseManifest = {
   assets: Array<{ path: string; requiredForOffline: boolean }>;
@@ -29,6 +24,7 @@ const shellPaths = [
   .map((match) => `/${match[1]!.replace(/^\//, "")}`)
   .sort();
 const currentCacheName = `smart-smile-vision-${releaseManifest.releaseId}`;
+const corruptWasmCookieName = "__smart_smile_e2e_corrupt_wasm";
 const completionPath = (releaseId: string) =>
   `/__smart-smile/vision-complete/${releaseId}`;
 const forbiddenPersistence =
@@ -36,11 +32,26 @@ const forbiddenPersistence =
 
 test.describe.configure({ mode: "serial" });
 
-async function setCorruptWasm(request: APIRequestContext, enabled: boolean) {
-  const response = await request.get(
+async function setCorruptWasm(page: Page, enabled: boolean) {
+  const response = await page.request.get(
     `/__e2e__/fault/corrupt-wasm/${enabled ? "on" : "off"}`,
   );
   expect(response.status()).toBe(204);
+  const faultCookies = (await page.context().cookies()).filter(
+    ({ name }) => name === corruptWasmCookieName,
+  );
+  if (enabled) {
+    expect(faultCookies).toEqual([
+      expect.objectContaining({
+        httpOnly: true,
+        name: corruptWasmCookieName,
+        sameSite: "Strict",
+        value: "1",
+      }),
+    ]);
+  } else {
+    expect(faultCookies).toEqual([]);
+  }
 }
 
 async function waitForShellWorker(page: Page) {
@@ -121,6 +132,7 @@ test("initializes the real release, commits an allowlisted cache, and reopens of
       localStorageEntries: 0,
       sessionStorageEntries: 0,
     });
+    expect(await context.cookies()).toEqual([]);
     expect(storage.caches).toHaveLength(2);
     const shellCache = storage.caches.find(({ cacheName }) =>
       cacheName.startsWith("workbox-precache-"),
@@ -234,9 +246,9 @@ test("shows focused first-use-offline recovery without requesting camera", async
 
 test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
   browser,
-  request,
 }) => {
   const context = await browser.newContext();
+  const cleanContext = await browser.newContext();
   await context.addInitScript(() => {
     window.visionCameraTracks = [];
     const original = navigator.mediaDevices.getUserMedia.bind(
@@ -255,7 +267,24 @@ test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
   const page = await context.newPage();
   try {
     await page.goto("/");
-    await setCorruptWasm(request, true);
+    await setCorruptWasm(page, true);
+    expect(await cleanContext.cookies()).toEqual([]);
+    const simdWasmPath = releaseManifest.assets.find(({ path }) =>
+      path.endsWith("/vision_wasm_internal.wasm"),
+    )!.path;
+    const [corruptResponse, pristineResponse] = await Promise.all([
+      page.request.get(simdWasmPath),
+      cleanContext.request.get(simdWasmPath),
+    ]);
+    expect(corruptResponse.status()).toBe(200);
+    expect(pristineResponse.status()).toBe(200);
+    expect(corruptResponse.headers()["content-type"]).toBe("application/wasm");
+    expect(pristineResponse.headers()["content-type"]).toBe("application/wasm");
+    const corruptBytes = await corruptResponse.body();
+    const pristineBytes = await pristineResponse.body();
+    expect(corruptBytes.length).toBe(pristineBytes.length);
+    expect(corruptBytes.subarray(0, -1)).toEqual(pristineBytes.subarray(0, -1));
+    expect(corruptBytes.at(-1)).toBe(pristineBytes.at(-1)! ^ 1);
     await page.getByRole("button", { name: "Continue to camera" }).click();
 
     const heading = page.getByRole("heading", {
@@ -263,7 +292,16 @@ test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
     });
     await expect(heading).toBeVisible({ timeout: 60_000 });
     await expect(heading).toBeFocused();
-    await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
+    const recovery = page.locator(".coach-card--recovery");
+    await expect(recovery).toContainText(
+      "The required files could not be verified. Reload Smart Smile before using the camera.",
+    );
+    await expect(
+      recovery.getByRole("button", { name: "Reload" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Help & system status" }),
+    ).toBeVisible();
     await expect(
       page.getByRole("status", { name: "Camera status" }),
     ).not.toContainText("Smart Smile is ready for offline use");
@@ -278,23 +316,31 @@ test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
         ),
       )
       .toBe(true);
-    const baselineWasmPath = releaseManifest.assets.find(({ path }) =>
-      path.endsWith("vision_wasm_nosimd_internal.wasm"),
-    )!.path;
+    const baselinePaths = releaseManifest.assets
+      .filter(
+        ({ path }) =>
+          path.endsWith("vision_wasm_nosimd_internal.js") ||
+          path.endsWith("vision_wasm_nosimd_internal.wasm"),
+      )
+      .map(({ path }) => path);
+    expect(baselinePaths).toHaveLength(2);
     expect(
-      requestedPaths.filter((path) => path === baselineWasmPath).length,
-    ).toBeLessThanOrEqual(1);
+      requestedPaths.filter((path) => baselinePaths.includes(path)),
+    ).toEqual([]);
     await expect(page.locator("body")).not.toContainText(
-      /runtime-integrity-failed|VisionRuntimeError|Vision runtime failed|WebAssembly\./,
+      /TypeError|CompileError|RuntimeError|WebAssembly|\bintegrity(?:\.[cm]?[jt]s)?\b|runtime-integrity-failed|(?:^|\n)\s*at\s+\S+|https?:\/\/|\/vision\/|\S+\.wasm\b/im,
     );
     await expect
       .poll(() =>
         page.evaluate(
           async ({ cacheName, markerPath }) => {
             const keys = await caches.keys();
+            if (!keys.includes(cacheName)) {
+              return { cacheExists: false, completionExists: false };
+            }
             const cache = await caches.open(cacheName);
             return {
-              cacheExists: keys.includes(cacheName),
+              cacheExists: true,
               completionExists:
                 (await cache.match(new URL(markerPath, location.origin))) !==
                 undefined,
@@ -309,16 +355,16 @@ test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
       .toEqual({ cacheExists: false, completionExists: false });
   } finally {
     try {
-      await setCorruptWasm(request, false);
+      await setCorruptWasm(page, false);
+      expect(await context.cookies()).toEqual([]);
     } finally {
-      await context.close();
+      await Promise.all([context.close(), cleanContext.close()]);
     }
   }
 });
 
 test("rolls back a corrupt current release while retaining a completed sentinel", async ({
   browser,
-  request,
 }) => {
   const sentinelReleaseId = "0123456789abcdef";
   const sentinelCacheName = `smart-smile-vision-${sentinelReleaseId}`;
@@ -349,8 +395,27 @@ test("rolls back a corrupt current release while retaining a completed sentinel"
         sentinelName: sentinelCacheName,
       },
     );
-    await setCorruptWasm(request, true);
+    await setCorruptWasm(page, true);
     await page.getByRole("button", { name: "Continue to camera" }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async ({ cacheName, markerPath }) => {
+            if (!(await caches.keys()).includes(cacheName)) return false;
+            const cache = await caches.open(cacheName);
+            const entries = await cache.keys();
+            return (
+              entries.length > 0 &&
+              (await cache.match(markerPath)) === undefined
+            );
+          },
+          {
+            cacheName: currentCacheName,
+            markerPath: completionPath(releaseManifest.releaseId),
+          },
+        ),
+      )
+      .toBe(true);
     await expect(
       page.getByRole("heading", {
         name: "Smart Smile could not start safely",
@@ -367,12 +432,22 @@ test("rolls back a corrupt current release while retaining a completed sentinel"
             sentinelName,
           }) => {
             const cacheNames = await caches.keys();
-            const current = await caches.open(currentName);
             const sentinel = await caches.open(sentinelName);
+            const currentExists = cacheNames.includes(currentName);
+            let currentCompletion = false;
+            let currentEntries: string[] = [];
+            if (currentExists) {
+              const current = await caches.open(currentName);
+              currentCompletion =
+                (await current.match(currentMarker)) !== undefined;
+              currentEntries = (await current.keys()).map(
+                (request) => request.url,
+              );
+            }
             return {
-              currentCompletion:
-                (await current.match(currentMarker)) !== undefined,
-              currentExists: cacheNames.includes(currentName),
+              currentCompletion,
+              currentEntries,
+              currentExists,
               sentinelCompletion:
                 (await (await sentinel.match(sentinelMarker))?.json()) ?? null,
               sentinelExists: cacheNames.includes(sentinelName),
@@ -388,6 +463,7 @@ test("rolls back a corrupt current release while retaining a completed sentinel"
       )
       .toEqual({
         currentCompletion: false,
+        currentEntries: [],
         currentExists: false,
         sentinelCompletion: {
           assetCount: 1,
@@ -398,7 +474,8 @@ test("rolls back a corrupt current release while retaining a completed sentinel"
       });
   } finally {
     try {
-      await setCorruptWasm(request, false);
+      await setCorruptWasm(page, false);
+      expect(await context.cookies()).toEqual([]);
     } finally {
       if (!page.isClosed()) {
         await page.evaluate(

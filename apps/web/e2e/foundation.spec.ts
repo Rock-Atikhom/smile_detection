@@ -140,6 +140,19 @@ test("opens the privacy dialog under production CSP without requesting camera or
   expect(response?.headers()["content-security-policy"]).toContain(
     "style-src 'self'",
   );
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        const cacheNames = await caches.keys();
+        if (registrations.length !== 1 || cacheNames.length !== 1) return false;
+        return (await (await caches.open(cacheNames[0]!)).keys()).length > 0;
+      }),
+    )
+    .toBe(true);
   await page.getByRole("button", { name: "How privacy works" }).click();
   const dialog = page.getByRole("dialog", { name: "How privacy works" });
   await expect(dialog).toBeVisible();
@@ -213,10 +226,13 @@ test("opens the privacy dialog under production CSP without requesting camera or
         ? (await navigator.serviceWorker.getRegistrations()).length
         : 0,
   }));
-  expect(shellStorage.serviceWorkerCount).toBeLessThanOrEqual(1);
-  expect(shellStorage.cacheInventory.length).toBeLessThanOrEqual(1);
+  expect(shellStorage.serviceWorkerCount).toBe(1);
+  expect(shellStorage.cacheInventory).toHaveLength(1);
   for (const { cacheName, urls } of shellStorage.cacheInventory) {
     expect(cacheName).toMatch(/^workbox-precache-/);
+    expect(
+      urls.every((url) => !new URL(url).pathname.startsWith("/vision/")),
+    ).toBe(true);
     expect(urls).not.toEqual(
       expect.arrayContaining([
         expect.stringMatching(

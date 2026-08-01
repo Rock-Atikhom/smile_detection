@@ -28,19 +28,34 @@ const contentTypes = new Map([
   [".task", "application/octet-stream"],
   [".wasm", "application/wasm"],
 ]);
-let corruptWasm = false;
+const corruptWasmCookieName = "__smart_smile_e2e_corrupt_wasm";
+const corruptWasmDelayMs = 250;
+
+function hasCorruptWasmCookie(request) {
+  return (request.headers.cookie ?? "")
+    .split(";")
+    .some((cookie) => cookie.trim() === `${corruptWasmCookieName}=1`);
+}
 
 const server = createServer((request, response) => {
   const pathname = new URL(request.url ?? "/", `http://${host}:${port}`)
     .pathname;
   if (pathname === "/__e2e__/fault/corrupt-wasm/on") {
-    corruptWasm = true;
-    response.writeHead(204, { "Cache-Control": "no-store" }).end();
+    response
+      .writeHead(204, {
+        "Cache-Control": "no-store",
+        "Set-Cookie": `${corruptWasmCookieName}=1; Path=/; HttpOnly; SameSite=Strict`,
+      })
+      .end();
     return;
   }
   if (pathname === "/__e2e__/fault/corrupt-wasm/off") {
-    corruptWasm = false;
-    response.writeHead(204, { "Cache-Control": "no-store" }).end();
+    response
+      .writeHead(204, {
+        "Cache-Control": "no-store",
+        "Set-Cookie": `${corruptWasmCookieName}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+      })
+      .end();
     return;
   }
   const requestedPath = pathname === "/" ? "index.html" : pathname.slice(1);
@@ -63,10 +78,10 @@ const server = createServer((request, response) => {
     ...headers,
     "Content-Type": contentTypes.get(extension) ?? "application/octet-stream",
   });
-  if (corruptWasm && extension === ".wasm") {
+  if (hasCorruptWasmCookie(request) && extension === ".wasm") {
     const bytes = Buffer.from(readFileSync(filePath));
     if (bytes.length > 0) bytes[bytes.length - 1] ^= 1;
-    response.end(bytes);
+    setTimeout(() => response.end(bytes), corruptWasmDelayMs);
     return;
   }
   createReadStream(filePath).pipe(response);
