@@ -49,6 +49,10 @@ const notices = readFileSync(
   new URL("../../../THIRD_PARTY_NOTICES.md", import.meta.url),
   "utf8",
 );
+const rootReadme = readFileSync(
+  new URL("../../../README.md", import.meta.url),
+  "utf8",
+);
 
 const builtServiceWorker = existsSync(new URL("../dist/sw.js", import.meta.url))
   ? readFileSync(new URL("../dist/sw.js", import.meta.url), "utf8")
@@ -81,6 +85,16 @@ function parseCsp(input: string) {
       .map((directive) => directive.trim().split(/\s+/))
       .filter(([name]) => name)
       .map(([name, ...values]) => [name, values]),
+  );
+}
+
+function normalizeDocumentation(input: string) {
+  return input.replace(/\s+/g, " ").trim();
+}
+
+function expectDocumentedClause(document: string, clause: string) {
+  expect(normalizeDocumentation(document)).toContain(
+    normalizeDocumentation(clause),
   );
 }
 
@@ -166,7 +180,7 @@ test("pins the supported Node and npm toolchain", () => {
   );
 });
 
-test("tracks the approved architecture, privacy, and validation boundaries", () => {
+test("tracks the complete offline vision architecture boundary", () => {
   for (const path of [
     "../../../docs/architecture/README.md",
     "../../../docs/privacy/README.md",
@@ -175,16 +189,145 @@ test("tracks the approved architecture, privacy, and validation boundaries", () 
     expect(existsSync(new URL(path, import.meta.url))).toBe(true);
   }
 
-  expect(architecture).toContain("@mediapipe/tasks-vision@0.10.35");
-  expect(architecture).toContain("classic worker");
-  expect(architecture).toContain("generation");
-  expect(privacy).toContain("Camera frames are never written to Cache Storage");
-  expect(validation).toContain(
-    "online preparation followed by airplane-mode close/reopen",
+  for (const clause of [
+    `Ticket 03 adds a verified runtime-initialization path only. It pins
+    \`@mediapipe/tasks-vision@0.10.35\` and the official Face Landmarker model
+    \`float16/1\`. The deterministic release manifest is
+    \`apps/web/src/vision/generated/release-manifest.json\`; its current release ID is
+    \`6c23e451b7a9b523\`, and it inventories byte counts, SHA-256 values, provenance,
+    license references, and every same-origin immutable asset beneath
+    \`apps/web/public/vision/mediapipe-0.10.35-face-landmarker-float16-v1/\`.`,
+    `- The main-thread \`VisionCoordinator\` owns explicit-camera-intent start,
+    worker lifecycle, generation guards, participant-safe state, and commands to
+    the service worker. React observes its snapshot; it owns no MediaPipe object
+    or persistent runtime data.`,
+    `- The dedicated classic worker owns manifest and critical-byte verification,
+    capability selection, and one Face Landmarker initialization. It tries SIMD
+    first, retries the allowlisted ordinary-WASM baseline tier once only when SIMD
+    is unsupported or cannot initialize, and never chooses WebGPU. Ticket 03 does
+    not submit frames to that instance or expose application landmarks,
+    blendshapes, face boxes, geometry, scores, or smile decisions.`,
+    `- The service worker owns the shell cache, versioned vision-release cache,
+    verified cache transaction, and offline immutable-asset responses. It owns no
+    MediaPipe instance and never handles participant data.`,
+    `Worker events may update state only when their generation matches the active
+    coordinator generation; stale-generation events cannot update runtime readiness,
+    offline readiness, recovery, or participant-facing state.`,
+    `The application shell cache contains the small hashed application shell,
+    including generated release-manifest metadata, but no vendored vision release
+    files. After **Continue to camera**, the service worker opens a separate
+    versioned cache and fetches every manifest allowlisted asset from the same
+    origin. It validates HTTP success, byte count, and SHA-256, stores verified
+    responses, reads every required response back, and writes its completion marker
+    last. Only a matching cache with that marker and successful readback is usable;
+    cancellation, a failed download, or an integrity failure deletes the incomplete
+    new cache while preserving a previously complete release.`,
+    `On a first offline use with only the shell cache, the coordinator presents
+    **Connect once to finish setup** without asking for camera permission. A
+    complete matching release initializes from cache after a close/reopen. An
+    integrity mismatch blocks initialization, removes affected unverified or
+    incomplete cache content, stops the camera, and presents safe recovery rather
+    than raw runtime details.`,
+  ]) {
+    expectDocumentedClause(architecture, clause);
+  }
+});
+
+test("tracks the complete non-goal and persistence boundary", () => {
+  expectDocumentedClause(
+    rootReadme,
+    `Ticket 03 prepares a self-hosted, on-device vision runtime; it stops at runtime
+    initialization and verified offline reopening. It does not submit camera frames,
+    extract landmarks or blendshapes for the application, or detect smiles. No
+    dataset is collected and no custom model is trained.`,
   );
-  expect(deployment).toContain("'wasm-unsafe-eval'");
-  expect(notices).toContain("MediaPipe");
-  expect(notices).toContain("Face Landmarker");
+
+  for (const clause of [
+    `Camera frames are never written to Cache Storage. Nor are camera output, photos,
+    Blobs, object URLs, landmarks, blendshapes, face boxes, geometry, score data,
+    diagnostics, device labels, device IDs, persistent identifiers, participant
+    names, network identifiers, localStorage values, sessionStorage values, or
+    IndexedDB records. No analytics, crash reporting, upload endpoint, remote model
+    CDN, or participant-data request is used.`,
+    `The persisted static allowlist is exact: the Workbox shell cache may contain the
+    hashed application shell, PWA icons, static recovery help, and the generated
+    release-manifest metadata; the separate versioned vision cache may contain only
+    the immutable manifest paths for release \`6c23e451b7a9b523\` plus its matching
+    completion-marker record. That release is MediaPipe runtime/WASM files, the
+    Face Landmarker \`float16/1\` task bundle, the MediaPipe license and notice, and
+    the three upstream model cards. The completion marker is written only after
+    every required response has been integrity-checked and read back, so a partial
+    cache is not an offline-ready release.`,
+  ]) {
+    expectDocumentedClause(privacy, clause);
+  }
+});
+
+test("tracks the exact CSP, acceptance, and provenance clauses", () => {
+  expectDocumentedClause(
+    deployment,
+    `Ticket 03 uses only the minimum proven expansion for the self-hosted runtime:
+    \`worker-src 'self'\` permits the bundled classic worker from this origin and
+    continues to reject \`blob:\` and \`data:\` workers. \`script-src 'self'
+    'wasm-unsafe-eval'\` permits WebAssembly compilation for the pinned local
+    runtime; \`'wasm-unsafe-eval'\` does not enable JavaScript \`eval()\`. Do not add
+    \`'unsafe-eval'\`, a remote runtime/CDN origin, or a broad worker source.`,
+  );
+  expectDocumentedClause(
+    validation,
+    `For named physical-browser acceptance, use online preparation followed by
+    airplane-mode close/reopen: online, select **Continue to camera** and wait until
+    both runtime and offline use report ready; close the browser page; enable airplane
+    mode; reopen the page; select **Continue to camera**; then confirm **Camera ready**
+    without a network request.`,
+  );
+  expectDocumentedClause(
+    notices,
+    `Smart Smile redistributes the self-hosted MediaPipe Tasks Vision runtime
+    \`@mediapipe/tasks-vision@0.10.35\` and the official Face Landmarker model
+    \`float16/1\` as release \`6c23e451b7a9b523\`. The immutable release inventory,
+    SHA-256 values, byte counts, and per-asset provenance are in
+    \`apps/web/src/vision/generated/release-manifest.json\`.`,
+  );
+  expectDocumentedClause(
+    notices,
+    `The upstream-original \`LICENSE-MediaPipe.txt\` is copied from the MediaPipe
+    \`v0.10.35\` license; Smart Smile's vendor script generates \`NOTICE.txt\` locally
+    from the pinned package, model, model-card, and license source URLs.`,
+  );
+  expectDocumentedClause(
+    notices,
+    `- MediaPipe Tasks Vision package source:
+    <https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.35.tgz>
+    - MediaPipe source and release: <https://github.com/google-ai-edge/mediapipe/tree/v0.10.35>
+    - MediaPipe license: <https://raw.githubusercontent.com/google-ai-edge/mediapipe/v0.10.35/LICENSE>
+    - Face Landmarker model bundle:
+    <https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task>
+    - BlazeFace Short Range model card:
+    <https://storage.googleapis.com/mediapipe-assets/MediaPipe%20BlazeFace%20Model%20Card%20%28Short%20Range%29.pdf>
+    - Face Mesh V2 model card:
+    <https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf>
+    - Blendshape V2 model card:
+    <https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Blendshape%20V2.pdf>`,
+  );
+});
+
+test("rejects contradictory Ticket 03 documentation", () => {
+  const documentedBoundary = normalizeDocumentation(
+    [rootReadme, architecture, privacy, validation, deployment, notices].join(
+      "\n",
+    ),
+  );
+  for (const contradiction of [
+    /\b(?:(?:uses|runs in|creates) (?:a )?module worker|(?:a )?module worker (?:is|may be|can be) (?:used|enabled|selected))\b/i,
+    /\b(?:WebGPU (?:is|may be|can be) (?:enabled|selected|used)|(?:Ticket 03|the runtime) enables WebGPU)\b/i,
+    /\bCamera frames (?:are|may be|can be) (?:written|stored|cached) (?:in|to) Cache Storage\b/i,
+    /\bparticipant data (?:is|may be|can be) (?:written|stored|cached) (?:in|to) Cache Storage\b/i,
+    /\b(?:remote|CDN) runtime (?:is|may be|can be) (?:enabled|selected|used|allowed)\b/i,
+    /\bTicket 03 (?:detects smiles|(?:performs|implements|enables|includes|delivers) smile detection)\b/i,
+  ]) {
+    expect(documentedBoundary).not.toMatch(contradiction);
+  }
 });
 
 test("keeps Cloudflare deployment downstream of the complete web gate", () => {

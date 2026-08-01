@@ -22,9 +22,11 @@ SHA-256 values, byte counts, and per-asset provenance are in
   <https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Blendshape%20V2.pdf>
 
 The shipped release directory is
-`apps/web/public/vision/mediapipe-0.10.35-face-landmarker-float16-v1/`. It
-contains the original `LICENSE-MediaPipe.txt` and `NOTICE.txt`; retain both and
-this notice when redistributing the vendored runtime or derivative source
-distribution. The MediaPipe license is Apache License 2.0. This notice records
-upstream provenance and does not state model licensing terms beyond the linked
-upstream model bundle and model cards.
+`apps/web/public/vision/mediapipe-0.10.35-face-landmarker-float16-v1/`. The
+upstream-original `LICENSE-MediaPipe.txt` is copied from the MediaPipe
+`v0.10.35` license; Smart Smile's vendor script generates `NOTICE.txt` locally
+from the pinned package, model, model-card, and license source URLs. Retain both
+files and this notice when redistributing the vendored runtime or derivative
+source distribution. The MediaPipe license is Apache License 2.0. This notice
+records upstream provenance and does not state model licensing terms beyond the
+linked upstream model bundle and model cards.

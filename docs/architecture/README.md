@@ -37,6 +37,10 @@ Ownership stays deliberately narrow:
   verified cache transaction, and offline immutable-asset responses. It owns no
   MediaPipe instance and never handles participant data.
 
+Worker events may update state only when their generation matches the active
+coordinator generation; stale-generation events cannot update runtime readiness,
+offline readiness, recovery, or participant-facing state.
+
 The application shell cache contains the small hashed application shell,
 including generated release-manifest metadata, but no vendored vision release
 files. After **Continue to camera**, the service worker opens a separate
