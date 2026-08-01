@@ -665,6 +665,40 @@ describe("VisionCoordinator", () => {
     coordinator.dispose();
   });
 
+  it("rejects a cross-origin manifest redirect before authorizing startup", async () => {
+    const fetchManifest = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.mode === "same-origin" && init.redirect === "error") {
+          throw new TypeError("cross-origin redirect blocked");
+        }
+        return new Response("redirected cross-origin manifest", {
+          status: 200,
+        });
+      },
+    );
+    const WorkerConstructor = vi.fn(() => new FakeWorker());
+    vi.stubGlobal("fetch", fetchManifest);
+    vi.stubGlobal("Worker", WorkerConstructor);
+    const coordinator = createBrowserVisionCoordinator();
+
+    await expect(coordinator.prepare()).resolves.toBe("first-use-offline");
+
+    expect(fetchManifest).toHaveBeenCalledWith(expect.any(URL), {
+      cache: "no-store",
+      credentials: "same-origin",
+      mode: "same-origin",
+      redirect: "error",
+      signal: expect.any(AbortSignal),
+    });
+    expect(WorkerConstructor).not.toHaveBeenCalled();
+    expect(coordinator.snapshot).toMatchObject({
+      runtime: "error",
+      offlineCache: "not-ready",
+      reason: "first-use-offline",
+    });
+    coordinator.dispose();
+  });
+
   it("disposes listeners and owned work once and ignores late replies", async () => {
     const harness = createHarness();
     await harness.coordinator.prepare();

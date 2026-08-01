@@ -497,6 +497,8 @@ export function createBrowserVisionCoordinator(): VisionCoordinator {
         const response = await fetch(probeUrl, {
           cache: "no-store",
           credentials: "same-origin",
+          mode: "same-origin",
+          redirect: "error",
           signal,
         });
         return response.ok;
