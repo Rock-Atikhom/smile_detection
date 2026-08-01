@@ -113,35 +113,135 @@ function hasDocumentationContradiction(document: string) {
   );
 }
 
-function extractMarkdownSection(document: string, expectedHeading: string) {
-  const lines = document.replace(/\r\n?/g, "\n").split("\n");
-  const headingPattern = /^[\t ]{0,3}(#{1,6})[\t ]+(.+?)[\t ]*#*[\t ]*$/;
-  const expected = normalizeDocumentation(expectedHeading);
-  let start = -1;
-  let level = 0;
+type FenceMarker = "`" | "~";
+
+interface MarkdownFence {
+  length: number;
+  marker: FenceMarker;
+}
+
+interface MarkdownHeading {
+  index: number;
+  level: number;
+  title: string;
+}
+
+function contentStartAfterMarkdownIndent(line: string) {
+  let index = 0;
+  while (line[index] === " ") index += 1;
+  if (index > 3 || line[index] === "\t") return undefined;
+  return index;
+}
+
+function isMarkdownWhitespace(character: string | undefined) {
+  return character === " " || character === "\t";
+}
+
+function readOpeningFence(line: string): MarkdownFence | undefined {
+  const start = contentStartAfterMarkdownIndent(line);
+  if (start === undefined) return undefined;
+  const marker = line[start];
+  if (marker !== "`" && marker !== "~") return undefined;
+
+  let end = start;
+  while (line[end] === marker) end += 1;
+  const length = end - start;
+  if (length < 3) return undefined;
+  if (marker === "`") {
+    for (let index = end; index < line.length; index += 1) {
+      if (line[index] === "`") return undefined;
+    }
+  }
+  return { length, marker };
+}
+
+function isClosingFence(line: string, fence: MarkdownFence) {
+  const start = contentStartAfterMarkdownIndent(line);
+  if (start === undefined || line[start] !== fence.marker) return false;
+
+  let end = start;
+  while (line[end] === fence.marker) end += 1;
+  if (end - start < fence.length) return false;
+  for (let index = end; index < line.length; index += 1) {
+    if (!isMarkdownWhitespace(line[index])) return false;
+  }
+  return true;
+}
+
+function readAtxHeading(
+  line: string,
+  index: number,
+): MarkdownHeading | undefined {
+  const start = contentStartAfterMarkdownIndent(line);
+  if (start === undefined || line[start] !== "#") return undefined;
+
+  let titleStart = start;
+  while (line[titleStart] === "#") titleStart += 1;
+  const level = titleStart - start;
+  if (level > 6) return undefined;
+  if (titleStart < line.length && !isMarkdownWhitespace(line[titleStart])) {
+    return undefined;
+  }
+
+  while (isMarkdownWhitespace(line[titleStart])) titleStart += 1;
+  let titleEnd = line.length;
+  while (isMarkdownWhitespace(line[titleEnd - 1])) titleEnd -= 1;
+
+  let closingStart = titleEnd;
+  while (line[closingStart - 1] === "#") closingStart -= 1;
+  if (
+    closingStart < titleEnd &&
+    (closingStart === titleStart ||
+      isMarkdownWhitespace(line[closingStart - 1]))
+  ) {
+    titleEnd = closingStart;
+    while (isMarkdownWhitespace(line[titleEnd - 1])) titleEnd -= 1;
+  }
+
+  return {
+    index,
+    level,
+    title: normalizeDocumentation(line.slice(titleStart, titleEnd)),
+  };
+}
+
+function scanMarkdownHeadings(document: string) {
+  const lines = document
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .split("\n");
+  const headings: MarkdownHeading[] = [];
+  let fence: MarkdownFence | undefined;
 
   for (const [index, line] of lines.entries()) {
-    const match = headingPattern.exec(line);
-    if (match && normalizeDocumentation(match[2]!) === expected) {
-      start = index;
-      level = match[1]!.length;
-      break;
+    if (fence !== undefined) {
+      if (isClosingFence(line, fence)) fence = undefined;
+      continue;
     }
+    const openingFence = readOpeningFence(line);
+    if (openingFence !== undefined) {
+      fence = openingFence;
+      continue;
+    }
+    const heading = readAtxHeading(line, index);
+    if (heading !== undefined) headings.push(heading);
   }
+  return { headings, lines };
+}
 
-  if (start < 0) {
+function extractMarkdownSection(document: string, expectedHeading: string) {
+  const { headings, lines } = scanMarkdownHeadings(document);
+  const expected = normalizeDocumentation(expectedHeading);
+  const start = headings.find(({ title }) => title === expected);
+  if (start === undefined) {
     throw new Error(`Missing documentation heading: ${expectedHeading}`);
   }
-
-  let end = lines.length;
-  for (let index = start + 1; index < lines.length; index += 1) {
-    const match = headingPattern.exec(lines[index]!);
-    if (match && match[1]!.length <= level) {
-      end = index;
-      break;
-    }
-  }
-  return lines.slice(start, end).join("\n");
+  const nextBoundary = headings.find(
+    ({ index, level }) => index > start.index && level <= start.level,
+  );
+  return lines
+    .slice(start.index, nextBoundary?.index ?? lines.length)
+    .join("\n");
 }
 
 function ticket03SectionsHaveContradiction(
@@ -444,6 +544,73 @@ test("allows future-ticket architecture outside the Ticket 03 section", () => {
       },
     ]),
   ).toBe(false);
+});
+
+test("ignores illegal indentation and attached-hash pseudo-headings", () => {
+  expect
+    .soft(
+      () =>
+        extractMarkdownSection(
+          "\t## Ticket 03 boundary\nTab-indented content.",
+          "Ticket 03 boundary",
+        ),
+      "a tab-indented ATX-looking line is not a heading",
+    )
+    .toThrow("Missing documentation heading: Ticket 03 boundary");
+  expect
+    .soft(
+      () =>
+        extractMarkdownSection(
+          "## Ticket 03 boundary###\nAttached hashes are title text.",
+          "Ticket 03 boundary",
+        ),
+      "closing hashes require separating whitespace",
+    )
+    .toThrow("Missing documentation heading: Ticket 03 boundary");
+});
+
+test("ignores fenced headings when locating and ending sections", () => {
+  const fencedStart = ["```markdown", "## Ticket 03 boundary", "```"].join(
+    "\n",
+  );
+  expect(() =>
+    extractMarkdownSection(fencedStart, "Ticket 03 boundary"),
+  ).toThrow("Missing documentation heading: Ticket 03 boundary");
+
+  const fencedBoundary = [
+    "## Ticket 03 boundary",
+    "Before the fence.",
+    "~~~~markdown",
+    "## Fenced equal-rank pseudo-boundary",
+    "~~~",
+    "## Still fenced after a short closing fence",
+    "~~~~",
+    "After the fence.",
+    "## Ticket 04 boundary",
+    "Outside the extracted section.",
+  ].join("\n");
+  const extracted = extractMarkdownSection(
+    fencedBoundary,
+    "Ticket 03 boundary",
+  );
+  expect.soft(extracted).toContain("After the fence.");
+  expect.soft(extracted).not.toContain("Outside the extracted section.");
+});
+
+test("includes real nested headings and stops at a real equal boundary", () => {
+  const document = [
+    "   ## Ticket 03 boundary ###",
+    "Ticket 03 introduction.",
+    "### Nested detail",
+    "Nested Ticket 03 content.",
+    "## Ticket 04 boundary",
+    "Ticket 04 content.",
+  ].join("\n");
+  const extracted = extractMarkdownSection(document, "Ticket 03 boundary");
+
+  expect(extracted).toContain("### Nested detail");
+  expect(extracted).toContain("Nested Ticket 03 content.");
+  expect(extracted).not.toContain("Ticket 04 content.");
 });
 
 test("keeps Cloudflare deployment downstream of the complete web gate", () => {
