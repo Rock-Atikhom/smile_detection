@@ -166,7 +166,14 @@ test("opens the privacy dialog under production CSP without requesting camera or
   await expect
     .poll(() =>
       page.evaluate(async () => ({
-        cacheStorageEntries: (await caches.keys()).length,
+        cacheInventory: await Promise.all(
+          (await caches.keys()).map(async (cacheName) => ({
+            cacheName,
+            urls: (await (await caches.open(cacheName)).keys()).map(
+              (request) => request.url,
+            ),
+          })),
+        ),
         canvasElements: document.querySelectorAll("canvas").length,
         cookies: document.cookie,
         fileInputs: document.querySelectorAll('input[type="file"]').length,
@@ -175,7 +182,7 @@ test("opens the privacy dialog under production CSP without requesting camera or
             ? (await indexedDB.databases()).length
             : 0,
         localStorageEntries: localStorage.length,
-        serviceWorkers:
+        serviceWorkerCount:
           "serviceWorker" in navigator
             ? (await navigator.serviceWorker.getRegistrations()).length
             : 0,
@@ -183,17 +190,41 @@ test("opens the privacy dialog under production CSP without requesting camera or
         videoElements: document.querySelectorAll("video").length,
       })),
     )
-    .toEqual({
-      cacheStorageEntries: 0,
+    .toMatchObject({
       canvasElements: 0,
       cookies: "",
       fileInputs: 0,
       indexedDatabases: 0,
       localStorageEntries: 0,
-      serviceWorkers: 0,
       sessionStorageEntries: 0,
       videoElements: 0,
     });
+  const shellStorage = await page.evaluate(async () => ({
+    cacheInventory: await Promise.all(
+      (await caches.keys()).map(async (cacheName) => ({
+        cacheName,
+        urls: (await (await caches.open(cacheName)).keys()).map(
+          (request) => request.url,
+        ),
+      })),
+    ),
+    serviceWorkerCount:
+      "serviceWorker" in navigator
+        ? (await navigator.serviceWorker.getRegistrations()).length
+        : 0,
+  }));
+  expect(shellStorage.serviceWorkerCount).toBeLessThanOrEqual(1);
+  expect(shellStorage.cacheInventory.length).toBeLessThanOrEqual(1);
+  for (const { cacheName, urls } of shellStorage.cacheInventory) {
+    expect(cacheName).toMatch(/^workbox-precache-/);
+    expect(urls).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /(?:\.wasm|\.task|\.pdf)(?:$|\?)|\/vision\/.*vision_wasm.*\.js(?:$|\?)/i,
+        ),
+      ]),
+    );
+  }
 });
 
 test("preserves Ticket 01 privacy trigger non-text contrast", async ({
@@ -285,12 +316,31 @@ test("shows a decoded mirrored contained synthetic-camera preview and stops it i
   await expect(video).toHaveCSS("object-fit", "contain");
   await expect(video).toHaveCSS("transform", /matrix\(-1, 0, 0, 1,/);
   await expect(
-    page.getByRole("heading", { name: "Getting ready" }),
+    page.getByRole("heading", {
+      name: /Getting smile detection ready|Getting ready/,
+    }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Camera ready" })).toBeVisible(
-    { timeout: 5_000 },
+    { timeout: 60_000 },
   );
-  expect(postLoadRequests).toEqual([]);
+  const baseOrigin = new URL(page.url()).origin;
+  expect(
+    postLoadRequests.every((url) => new URL(url).origin === baseOrigin),
+  ).toBe(true);
+  expect(
+    postLoadRequests.every(
+      (url) =>
+        new URL(url).pathname.startsWith("/vision/") ||
+        new URL(url).pathname.startsWith("/assets/"),
+    ),
+  ).toBe(true);
+  expect(postLoadRequests).not.toEqual(
+    expect.arrayContaining([
+      expect.stringMatching(
+        /analytics|telemetry|error[-_/]?collector|crash|upload|googleapis|gstatic|cdn|camera|session|frame|photo|landmarks?(?:$|[/?#._-])|geometry|device[-_]?id/i,
+      ),
+    ]),
+  );
   await page.evaluate(() => {
     const stream = document.querySelector<HTMLVideoElement>("video")
       ?.srcObject as MediaStream | null;
@@ -333,7 +383,7 @@ for (const viewport of viewports) {
     });
     await expect(overlay).toBeVisible();
     await expect(overlay.getByRole("status")).toContainText(
-      /Getting ready|Camera ready/,
+      /Getting smile detection ready|Getting ready|Camera ready/,
     );
     await expect(
       overlay.getByRole("button", { name: "Stop camera" }),
@@ -503,7 +553,7 @@ test("hides Switch camera when a permitted stream exposes only one choice", asyn
   );
 });
 
-test("keeps application storage empty during a camera session", async ({
+test("keeps application persistence limited to static caches during a camera session", async ({
   page,
 }) => {
   await page.goto("/");
@@ -513,28 +563,57 @@ test("keeps application storage empty during a camera session", async ({
   await expect
     .poll(() =>
       page.evaluate(async () => ({
-        cacheStorageEntries: (await caches.keys()).length,
+        cacheInventory: await Promise.all(
+          (await caches.keys()).map(async (cacheName) => ({
+            cacheName,
+            urls: (await (await caches.open(cacheName)).keys()).map(
+              (request) => request.url,
+            ),
+          })),
+        ),
         cookies: document.cookie,
         indexedDatabases:
           typeof indexedDB.databases === "function"
             ? (await indexedDB.databases()).length
             : 0,
         localStorageEntries: localStorage.length,
-        serviceWorkers:
+        serviceWorkerCount:
           "serviceWorker" in navigator
             ? (await navigator.serviceWorker.getRegistrations()).length
             : 0,
         sessionStorageEntries: sessionStorage.length,
       })),
     )
-    .toEqual({
-      cacheStorageEntries: 0,
+    .toMatchObject({
       cookies: "",
       indexedDatabases: 0,
       localStorageEntries: 0,
-      serviceWorkers: 0,
       sessionStorageEntries: 0,
     });
+  const persistence = await page.evaluate(async () => ({
+    cacheInventory: await Promise.all(
+      (await caches.keys()).map(async (cacheName) => ({
+        cacheName,
+        urls: (await (await caches.open(cacheName)).keys()).map(
+          (request) => request.url,
+        ),
+      })),
+    ),
+    serviceWorkerCount:
+      "serviceWorker" in navigator
+        ? (await navigator.serviceWorker.getRegistrations()).length
+        : 0,
+  }));
+  expect(persistence.serviceWorkerCount).toBeLessThanOrEqual(1);
+  expect(persistence.cacheInventory.length).toBeLessThanOrEqual(2);
+  const forbiddenPersistence =
+    /blob:|data:|camera|frame|photo|landmarks?(?:$|[/?#._-])|geometry|diagnostic|device[-_ ]?(?:label|id)/i;
+  for (const { cacheName, urls } of persistence.cacheInventory) {
+    expect(cacheName).not.toMatch(forbiddenPersistence);
+    expect(urls).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(forbiddenPersistence)]),
+    );
+  }
 });
 
 declare global {

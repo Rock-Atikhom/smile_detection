@@ -28,10 +28,21 @@ const contentTypes = new Map([
   [".task", "application/octet-stream"],
   [".wasm", "application/wasm"],
 ]);
+let corruptWasm = false;
 
 const server = createServer((request, response) => {
   const pathname = new URL(request.url ?? "/", `http://${host}:${port}`)
     .pathname;
+  if (pathname === "/__e2e__/fault/corrupt-wasm/on") {
+    corruptWasm = true;
+    response.writeHead(204, { "Cache-Control": "no-store" }).end();
+    return;
+  }
+  if (pathname === "/__e2e__/fault/corrupt-wasm/off") {
+    corruptWasm = false;
+    response.writeHead(204, { "Cache-Control": "no-store" }).end();
+    return;
+  }
   const requestedPath = pathname === "/" ? "index.html" : pathname.slice(1);
   const filePath = resolve(dist, requestedPath);
 
@@ -47,11 +58,17 @@ const server = createServer((request, response) => {
     return;
   }
 
+  const extension = extname(filePath);
   response.writeHead(200, {
     ...headers,
-    "Content-Type":
-      contentTypes.get(extname(filePath)) ?? "application/octet-stream",
+    "Content-Type": contentTypes.get(extension) ?? "application/octet-stream",
   });
+  if (corruptWasm && extension === ".wasm") {
+    const bytes = Buffer.from(readFileSync(filePath));
+    if (bytes.length > 0) bytes[bytes.length - 1] ^= 1;
+    response.end(bytes);
+    return;
+  }
   createReadStream(filePath).pipe(response);
 });
 
