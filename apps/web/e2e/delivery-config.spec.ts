@@ -29,6 +29,26 @@ const contractsPackage = JSON.parse(
     "utf8",
   ),
 ) as Record<string, unknown>;
+const architecture = readFileSync(
+  new URL("../../../docs/architecture/README.md", import.meta.url),
+  "utf8",
+);
+const privacy = readFileSync(
+  new URL("../../../docs/privacy/README.md", import.meta.url),
+  "utf8",
+);
+const validation = readFileSync(
+  new URL("../../../docs/validation/README.md", import.meta.url),
+  "utf8",
+);
+const deployment = readFileSync(
+  new URL("../../../docs/deployment/cloudflare-pages.md", import.meta.url),
+  "utf8",
+);
+const notices = readFileSync(
+  new URL("../../../THIRD_PARTY_NOTICES.md", import.meta.url),
+  "utf8",
+);
 
 const builtServiceWorker = existsSync(new URL("../dist/sw.js", import.meta.url))
   ? readFileSync(new URL("../dist/sw.js", import.meta.url), "utf8")
@@ -154,6 +174,17 @@ test("tracks the approved architecture, privacy, and validation boundaries", () 
   ]) {
     expect(existsSync(new URL(path, import.meta.url))).toBe(true);
   }
+
+  expect(architecture).toContain("@mediapipe/tasks-vision@0.10.35");
+  expect(architecture).toContain("classic worker");
+  expect(architecture).toContain("generation");
+  expect(privacy).toContain("Camera frames are never written to Cache Storage");
+  expect(validation).toContain(
+    "online preparation followed by airplane-mode close/reopen",
+  );
+  expect(deployment).toContain("'wasm-unsafe-eval'");
+  expect(notices).toContain("MediaPipe");
+  expect(notices).toContain("Face Landmarker");
 });
 
 test("keeps Cloudflare deployment downstream of the complete web gate", () => {
