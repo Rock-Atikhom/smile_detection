@@ -1,7 +1,10 @@
 import {
   isVisionCacheEvent,
+  isVisionServiceWorkerHandshakeEvent,
+  VISION_SERVICE_WORKER_PROTOCOL,
   type VisionCacheCommand,
   type VisionCacheEvent,
+  type VisionServiceWorkerHandshakeCommand,
 } from "../vision/protocol";
 
 export interface VisionCacheRequest {
@@ -9,7 +12,8 @@ export interface VisionCacheRequest {
   manifestUrl: string;
   releaseId: string;
 }
-export type VisionCacheQueryResult = "ready" | "missing" | "integrity-failed";
+export type VisionCacheQueryResult =
+  "ready" | "missing" | "integrity-failed" | "indeterminate";
 export type VisionCachePreparationResult =
   "ready" | "error" | "integrity-failed";
 export type VisionCachePreparationState =
@@ -26,11 +30,9 @@ export interface VisionCacheClient {
 }
 
 interface ServiceWorkerLike {
-  postMessage(message: VisionCacheCommand): void;
-}
-
-interface ServiceWorkerRegistrationLike {
-  active: ServiceWorkerLike | null;
+  postMessage(
+    message: VisionCacheCommand | VisionServiceWorkerHandshakeCommand,
+  ): void;
 }
 
 export interface ServiceWorkerContainerLike {
@@ -40,8 +42,11 @@ export interface ServiceWorkerContainerLike {
     listener: (event: MessageEvent<unknown>) => void,
   ): void;
   addEventListener(type: "controllerchange", listener: () => void): void;
+  removeEventListener(
+    type: "message",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
   removeEventListener(type: "controllerchange", listener: () => void): void;
-  ready: PromiseLike<ServiceWorkerRegistrationLike>;
   register(scriptURL: string): Promise<unknown>;
 }
 
@@ -72,7 +77,7 @@ function degradedClient(): VisionCacheClient {
     },
     cancel() {},
     async queryRelease() {
-      return "missing";
+      return "indeterminate";
     },
   };
 }
@@ -169,7 +174,7 @@ function createVisionCacheClient(
       return new Promise<VisionCacheQueryResult>((resolve) => {
         const timeout = setTimeout(() => {
           pending.delete(requestId);
-          resolve("missing");
+          resolve("indeterminate");
         }, REQUEST_TIMEOUT_MS);
         pending.set(requestId, {
           generation: request.generation,
@@ -191,7 +196,7 @@ function createVisionCacheClient(
               resolve(
                 event.code === "runtime-integrity-failed"
                   ? "integrity-failed"
-                  : "missing",
+                  : "indeterminate",
               );
               return true;
             }
@@ -201,7 +206,7 @@ function createVisionCacheClient(
         if (!post({ type: "QUERY_RELEASE", requestId, ...request })) {
           clearTimeout(timeout);
           pending.delete(requestId);
-          resolve("missing");
+          resolve("indeterminate");
         }
       });
     },
@@ -210,23 +215,57 @@ function createVisionCacheClient(
 
 let productionClientPromise: Promise<VisionCacheClient> | undefined;
 
-async function waitForController(
+async function waitForVerifiedController(
   serviceWorker: ServiceWorkerContainerLike,
 ): Promise<ServiceWorkerLike | undefined> {
-  if (serviceWorker.controller !== null) return serviceWorker.controller;
-
   return new Promise((resolve) => {
+    let candidate: ServiceWorkerLike | undefined;
+    let handshakeRequestId: string | undefined;
     const finish = (worker: ServiceWorkerLike | undefined) => {
       clearTimeout(timeout);
       serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      serviceWorker.removeEventListener("message", onMessage);
       resolve(worker);
     };
+    const onMessage = (event: MessageEvent<unknown>) => {
+      if (
+        candidate === undefined ||
+        handshakeRequestId === undefined ||
+        event.source !== (candidate as unknown as MessageEventSource) ||
+        !isVisionServiceWorkerHandshakeEvent(event.data) ||
+        event.data.requestId !== handshakeRequestId
+      ) {
+        return;
+      }
+      finish(candidate);
+    };
+    const probeController = () => {
+      const controller = serviceWorker.controller;
+      if (controller === null) {
+        candidate = undefined;
+        handshakeRequestId = undefined;
+        return;
+      }
+      if (controller === candidate) return;
+      candidate = controller;
+      handshakeRequestId = nextRequestId();
+      try {
+        controller.postMessage({
+          type: "VISION_SW_HANDSHAKE",
+          requestId: handshakeRequestId,
+          protocol: VISION_SERVICE_WORKER_PROTOCOL,
+        });
+      } catch {
+        finish(undefined);
+      }
+    };
     const onControllerChange = () => {
-      if (serviceWorker.controller !== null) finish(serviceWorker.controller);
+      probeController();
     };
     const timeout = setTimeout(() => finish(undefined), REQUEST_TIMEOUT_MS);
+    serviceWorker.addEventListener("message", onMessage);
     serviceWorker.addEventListener("controllerchange", onControllerChange);
-    onControllerChange();
+    probeController();
   });
 }
 
@@ -242,8 +281,7 @@ async function createApplicationServiceWorkerClient(
 
   try {
     await serviceWorker.register("/sw.js");
-    await serviceWorker.ready;
-    const controller = await waitForController(serviceWorker);
+    const controller = await waitForVerifiedController(serviceWorker);
     if (controller === undefined) return degradedClient();
     return createVisionCacheClient(controller, serviceWorker);
   } catch {

@@ -508,6 +508,115 @@ describe("vision release cache transaction", () => {
     },
   );
 
+  it("shares one completed-inventory verification while checking every immutable serve target", async () => {
+    const { cacheStorage, dependencies } = harness({
+      assets: [firstAsset, secondAsset],
+    });
+    await seedCompletion(cacheStorage, releaseId, 2, [firstAsset, secondAsset]);
+    const originalVerify = dependencies.verifyResponse!;
+    const firstVerificationStarted = deferred<void>();
+    const releaseFirstVerification = deferred<void>();
+    let firstCall = true;
+    const verification = vi.fn(async (response, expectedAsset) => {
+      if (firstCall) {
+        firstCall = false;
+        firstVerificationStarted.resolve();
+        await releaseFirstVerification.promise;
+      }
+      return originalVerify(response, expectedAsset);
+    });
+    dependencies.verifyResponse = verification;
+
+    const firstQuery = queryVisionRelease(releaseId, dependencies);
+    const secondQuery = queryVisionRelease(releaseId, dependencies);
+    const firstMatch = matchCompletedVisionAsset(
+      firstAsset.path,
+      releaseId,
+      dependencies,
+    );
+    const secondMatch = matchCompletedVisionAsset(
+      firstAsset.path,
+      releaseId,
+      dependencies,
+    );
+    await firstVerificationStarted.promise;
+    releaseFirstVerification.resolve();
+
+    const [firstState, secondState, firstResponse, secondResponse] =
+      await Promise.all([firstQuery, secondQuery, firstMatch, secondMatch]);
+    expect([firstState, secondState]).toEqual(["ready", "ready"]);
+    await expect(firstResponse?.text()).resolves.toBe("license");
+    await expect(secondResponse?.text()).resolves.toBe("license");
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "ready",
+    );
+    const thirdResponse = await matchCompletedVisionAsset(
+      firstAsset.path,
+      releaseId,
+      dependencies,
+    );
+    await expect(thirdResponse?.text()).resolves.toBe("license");
+
+    const verifiedAssets = verification.mock.calls.map(
+      ([, expectedAsset]) => expectedAsset.id,
+    );
+    expect(verifiedAssets.filter((id) => id === firstAsset.id)).toHaveLength(4);
+    expect(verifiedAssets.filter((id) => id === secondAsset.id)).toHaveLength(
+      1,
+    );
+  });
+
+  it("starts one fresh full scan after explicit population takes cache ownership", async () => {
+    const { cacheStorage, dependencies, fetch } = harness({
+      assets: [firstAsset, secondAsset],
+    });
+    await seedCompletion(cacheStorage, releaseId, 2, [firstAsset, secondAsset]);
+    const verification = vi.mocked(dependencies.verifyResponse!);
+
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "ready",
+    );
+    expect(verification).toHaveBeenCalledTimes(2);
+
+    await expect(cacheVisionRelease(command(), dependencies)).resolves.toBe(
+      "ready",
+    );
+    expect(verification).toHaveBeenCalledTimes(4);
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "ready",
+    );
+
+    expect(verification).toHaveBeenCalledTimes(4);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("invalidates trust before target-corruption cleanup and scans the replacement generation", async () => {
+    const { cacheStorage, dependencies, fetch } = harness({
+      assets: [firstAsset, secondAsset],
+    });
+    const cache = await seedCompletion(cacheStorage, releaseId, 2, [
+      firstAsset,
+      secondAsset,
+    ]);
+    const verification = vi.mocked(dependencies.verifyResponse!);
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "ready",
+    );
+    cache.entries.set(firstAsset.path, new Response("corrupt"));
+
+    await expect(
+      matchCompletedVisionAsset(firstAsset.path, releaseId, dependencies),
+    ).rejects.toMatchObject({ code: "runtime-integrity-failed" });
+    expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
+    await seedCompletion(cacheStorage, releaseId, 2, [firstAsset, secondAsset]);
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "ready",
+    );
+
+    expect(verification).toHaveBeenCalledTimes(5);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("serves an immutable entry only when the full completed inventory verifies", async () => {
     const { cacheStorage, dependencies } = harness({
       assets: [firstAsset, secondAsset],

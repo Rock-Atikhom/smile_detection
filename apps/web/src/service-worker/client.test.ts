@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { VisionCacheCommand, VisionCacheEvent } from "../vision/protocol";
+import {
+  VISION_SERVICE_WORKER_PROTOCOL,
+  type VisionCacheCommand,
+  type VisionCacheEvent,
+  type VisionServiceWorkerHandshakeCommand,
+} from "../vision/protocol";
 import {
   registerApplicationServiceWorker,
   type VisionCachePreparationState,
@@ -11,11 +16,28 @@ const manifestUrl = "/vision/release-manifest.json";
 class FakeServiceWorkerContainer {
   readonly listeners = new Set<(event: MessageEvent<unknown>) => void>();
   readonly controllerListeners = new Set<() => void>();
+  readonly handshakes: VisionServiceWorkerHandshakeCommand[] = [];
   readonly posted: VisionCacheCommand[] = [];
   readonly register = vi.fn(async () => ({ installing: {} }));
+  autoHandshake = true;
   readonly worker = {
-    postMessage: vi.fn((command: VisionCacheCommand) =>
-      this.posted.push(command),
+    postMessage: vi.fn(
+      (command: VisionCacheCommand | VisionServiceWorkerHandshakeCommand) => {
+        if (command.type === "VISION_SW_HANDSHAKE") {
+          this.handshakes.push(command);
+          if (this.autoHandshake) {
+            queueMicrotask(() =>
+              this.dispatch({
+                type: "VISION_SW_HANDSHAKE_ACK",
+                requestId: command.requestId,
+                protocol: VISION_SERVICE_WORKER_PROTOCOL,
+              }),
+            );
+          }
+          return;
+        }
+        this.posted.push(command);
+      },
     ),
   };
   readonly ready = Promise.resolve({ active: this.worker });
@@ -32,8 +54,15 @@ class FakeServiceWorkerContainer {
     }
   }
 
-  removeEventListener(type: "controllerchange", listener: () => void) {
-    if (type === "controllerchange") this.controllerListeners.delete(listener);
+  removeEventListener(
+    type: "message" | "controllerchange",
+    listener: ((event: MessageEvent<unknown>) => void) | (() => void),
+  ) {
+    if (type === "message") {
+      this.listeners.delete(listener as (event: MessageEvent<unknown>) => void);
+    } else {
+      this.controllerListeners.delete(listener as () => void);
+    }
   }
 
   claim() {
@@ -51,6 +80,131 @@ class FakeServiceWorkerContainer {
 describe("VisionCacheClient", () => {
   beforeEach(() => {
     vi.useRealTimers();
+  });
+
+  it("requires the current controller to prove the expected protocol before use", async () => {
+    const serviceWorker = new FakeServiceWorkerContainer();
+    serviceWorker.autoHandshake = false;
+    let settled = false;
+    const pendingClient = registerApplicationServiceWorker({ serviceWorker });
+    void pendingClient.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(serviceWorker.handshakes).toHaveLength(1);
+    expect(serviceWorker.posted).toEqual([]);
+
+    const handshake = serviceWorker.handshakes[0]!;
+    serviceWorker.dispatch({
+      type: "VISION_SW_HANDSHAKE_ACK",
+      requestId: handshake.requestId,
+      protocol: VISION_SERVICE_WORKER_PROTOCOL,
+    });
+    const client = await pendingClient;
+    const pendingQuery = client.queryRelease({ generation: 3, releaseId });
+    const sent = serviceWorker.posted[0]!;
+    serviceWorker.dispatch({
+      type: "CACHE_MISSING",
+      requestId: sent.requestId,
+      generation: 3,
+      releaseId,
+    });
+
+    await expect(pendingQuery).resolves.toBe("missing");
+  });
+
+  it("never uses an old controller and accepts the newly controlling worker only after proof", async () => {
+    const serviceWorker = new FakeServiceWorkerContainer();
+    const oldMessages: unknown[] = [];
+    const oldController = {
+      postMessage: vi.fn((message: unknown) => {
+        oldMessages.push(message);
+      }),
+    };
+    serviceWorker.controller = oldController as typeof serviceWorker.worker;
+    const pendingClient = registerApplicationServiceWorker({ serviceWorker });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(oldMessages).toEqual([
+      expect.objectContaining({
+        type: "VISION_SW_HANDSHAKE",
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      }),
+    ]);
+    serviceWorker.claim();
+
+    const client = await pendingClient;
+    const pendingQuery = client.queryRelease({ generation: 3, releaseId });
+    const sent = serviceWorker.posted[0]!;
+    expect(oldMessages).toHaveLength(1);
+    serviceWorker.dispatch({
+      type: "CACHE_READY",
+      requestId: sent.requestId,
+      generation: 3,
+      releaseId,
+    });
+    await expect(pendingQuery).resolves.toBe("ready");
+  });
+
+  it("rejects malformed or version-mismatched controller proof and times out as indeterminate", async () => {
+    vi.useFakeTimers();
+    const serviceWorker = new FakeServiceWorkerContainer();
+    serviceWorker.autoHandshake = false;
+    const pendingClient = registerApplicationServiceWorker({ serviceWorker });
+    await Promise.resolve();
+    await Promise.resolve();
+    const handshake = serviceWorker.handshakes[0]!;
+
+    serviceWorker.dispatch({
+      type: "VISION_SW_HANDSHAKE_ACK",
+      requestId: handshake.requestId,
+      protocol: "smart-smile-vision-sw-v0",
+    });
+    serviceWorker.dispatch({
+      type: "VISION_SW_HANDSHAKE_ACK",
+      requestId: handshake.requestId,
+      protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      unsafe: true,
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    const client = await pendingClient;
+    await expect(
+      client.queryRelease({ generation: 3, releaseId }),
+    ).resolves.toBe("indeterminate");
+    expect(serviceWorker.listeners.size).toBe(0);
+    expect(serviceWorker.controllerListeners.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("bounds controller selection even when service-worker ready never settles", async () => {
+    vi.useFakeTimers();
+    const serviceWorker = new FakeServiceWorkerContainer();
+    serviceWorker.controller = null;
+    Object.defineProperty(serviceWorker, "ready", {
+      configurable: true,
+      value: new Promise(() => undefined),
+    });
+    const pendingClient = registerApplicationServiceWorker({ serviceWorker });
+    let settled = false;
+    void pendingClient.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(settled).toBe(true);
+    const client = await pendingClient;
+    await expect(
+      client.queryRelease({ generation: 3, releaseId }),
+    ).resolves.toBe("indeterminate");
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("waits for ready and uses only its active worker", async () => {
@@ -280,6 +434,18 @@ describe("VisionCacheClient", () => {
     expect(states).toEqual(["error"]);
   });
 
+  it("reports a cache-query timeout as indeterminate instead of missing", async () => {
+    vi.useFakeTimers();
+    const serviceWorker = new FakeServiceWorkerContainer();
+    const client = await registerApplicationServiceWorker({ serviceWorker });
+    const pending = client.queryRelease({ generation: 4, releaseId });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await expect(pending).resolves.toBe("indeterminate");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("posts a bounded cancellation command without awaiting a reply", async () => {
     const serviceWorker = new FakeServiceWorkerContainer();
     const client = await registerApplicationServiceWorker({ serviceWorker });
@@ -309,7 +475,7 @@ describe("VisionCacheClient", () => {
     ).resolves.toBe("error");
     await expect(
       client.queryRelease({ generation: 4, releaseId }),
-    ).resolves.toBe("missing");
+    ).resolves.toBe("indeterminate");
     expect(states).toEqual(["error"]);
     expect(serviceWorker.posted).toEqual([]);
   });
@@ -317,10 +483,10 @@ describe("VisionCacheClient", () => {
   it("cleans pending state and degrades safely when postMessage throws", async () => {
     vi.useFakeTimers();
     const serviceWorker = new FakeServiceWorkerContainer();
+    const client = await registerApplicationServiceWorker({ serviceWorker });
     serviceWorker.worker.postMessage.mockImplementation(() => {
       throw new Error("private post failure");
     });
-    const client = await registerApplicationServiceWorker({ serviceWorker });
     const states: VisionCachePreparationState[] = [];
 
     await expect(
@@ -330,7 +496,7 @@ describe("VisionCacheClient", () => {
     ).resolves.toBe("error");
     await expect(
       client.queryRelease({ generation: 4, releaseId }),
-    ).resolves.toBe("missing");
+    ).resolves.toBe("indeterminate");
     expect(() => client.cancel({ generation: 4, releaseId })).not.toThrow();
     expect(states).toEqual(["error"]);
     expect(vi.getTimerCount()).toBe(0);

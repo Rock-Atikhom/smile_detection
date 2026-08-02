@@ -62,7 +62,50 @@ type CacheReleaseCommand = Extract<
 
 const activeControllers = new Map<number, Set<AbortController>>();
 const releaseLocks = new Map<string, Promise<void>>();
+interface CacheTrustGeneration {
+  generation: number;
+  inventoryVerification?: Promise<boolean>;
+}
+const cacheTrust = new WeakMap<
+  CacheStorageLike,
+  Map<string, CacheTrustGeneration>
+>();
 const SAFE_RESPONSE_HEADERS = ["content-type", "content-language"] as const;
+
+function trustGeneration(
+  cacheName: string,
+  dependencies: VisionCacheDependencies,
+): CacheTrustGeneration {
+  let storageTrust = cacheTrust.get(dependencies.cacheStorage);
+  if (storageTrust === undefined) {
+    storageTrust = new Map();
+    cacheTrust.set(dependencies.cacheStorage, storageTrust);
+  }
+  let generation = storageTrust.get(cacheName);
+  if (generation === undefined) {
+    generation = { generation: 0 };
+    storageTrust.set(cacheName, generation);
+  }
+  return generation;
+}
+
+function invalidateCacheTrust(
+  cacheName: string,
+  dependencies: VisionCacheDependencies,
+): void {
+  const previous = trustGeneration(cacheName, dependencies);
+  cacheTrust.get(dependencies.cacheStorage)!.set(cacheName, {
+    generation: previous.generation + 1,
+  });
+}
+
+async function deleteOwnedCache(
+  cacheName: string,
+  dependencies: VisionCacheDependencies,
+): Promise<boolean> {
+  invalidateCacheTrust(cacheName, dependencies);
+  return dependencies.cacheStorage.delete(cacheName);
+}
 
 function isCompletionRecord(
   value: unknown,
@@ -266,16 +309,44 @@ async function allEntriesAreVerified(
 }
 
 async function inspectCompletedCache(
-  cache: CacheLike,
+  cacheName: string,
   dependencies: VisionCacheDependencies,
   signal?: AbortSignal,
-): Promise<"ready" | "missing" | "integrity-failed"> {
-  const completion = await readCompletion(cache, dependencies);
-  if (completion.state === "missing") return "missing";
-  if (completion.state === "corrupt") return "integrity-failed";
-  return (await allEntriesAreVerified(cache, dependencies, signal))
-    ? "ready"
-    : "integrity-failed";
+): Promise<{
+  cache: CacheLike;
+  state: "ready" | "missing" | "integrity-failed";
+}> {
+  for (;;) {
+    if (signal !== undefined) ensureNotCancelled(signal);
+    const generation = trustGeneration(cacheName, dependencies);
+    const cache = await dependencies.cacheStorage.open(cacheName);
+    const completion = await readCompletion(cache, dependencies);
+    if (signal !== undefined) ensureNotCancelled(signal);
+    if (trustGeneration(cacheName, dependencies) !== generation) continue;
+    if (completion.state !== "complete") {
+      if (generation.inventoryVerification !== undefined) {
+        invalidateCacheTrust(cacheName, dependencies);
+        continue;
+      }
+      return {
+        cache,
+        state: completion.state === "missing" ? "missing" : "integrity-failed",
+      };
+    }
+
+    const verification =
+      generation.inventoryVerification ??
+      allEntriesAreVerified(cache, dependencies);
+    generation.inventoryVerification = verification;
+    const verified = await verification;
+    if (signal !== undefined) ensureNotCancelled(signal);
+    if (trustGeneration(cacheName, dependencies) !== generation) continue;
+    if (!verified) generation.inventoryVerification = undefined;
+    return {
+      cache,
+      state: verified ? "ready" : "integrity-failed",
+    };
+  }
 }
 
 async function deleteCorruptRelease(
@@ -283,7 +354,7 @@ async function deleteCorruptRelease(
   dependencies: VisionCacheDependencies,
 ): Promise<never> {
   try {
-    await dependencies.cacheStorage.delete(cacheName);
+    await deleteOwnedCache(cacheName, dependencies);
   } catch {
     // The fatal integrity result remains authoritative even if storage cleanup
     // itself fails. A later request must never treat this release as complete.
@@ -321,8 +392,7 @@ export async function queryVisionRelease(
 ): Promise<"ready" | "missing" | "integrity-failed"> {
   if (releaseId !== dependencies.manifest.releaseId) return "missing";
   const cacheName = visionCacheName(releaseId);
-  const cache = await dependencies.cacheStorage.open(cacheName);
-  const state = await inspectCompletedCache(cache, dependencies);
+  const { state } = await inspectCompletedCache(cacheName, dependencies);
   if (state !== "integrity-failed") return state;
   try {
     await deleteCorruptRelease(cacheName, dependencies);
@@ -351,14 +421,16 @@ export async function cacheVisionRelease(
   let cache: CacheLike | undefined;
   let mutationStarted = false;
   try {
+    invalidateCacheTrust(cacheName, dependencies);
     await lock.wait;
     ensureNotCancelled(controller.signal);
-    cache = await dependencies.cacheStorage.open(cacheName);
-    const existingState = await inspectCompletedCache(
-      cache,
+    const inspected = await inspectCompletedCache(
+      cacheName,
       dependencies,
       controller.signal,
     );
+    cache = inspected.cache;
+    const existingState = inspected.state;
     if (existingState === "ready") {
       ensureNotCancelled(controller.signal);
       return "ready";
@@ -369,6 +441,7 @@ export async function cacheVisionRelease(
 
     ensureNotCancelled(controller.signal);
     mutationStarted = true;
+    invalidateCacheTrust(cacheName, dependencies);
     const marker = completionUrl(dependencies.scope, command.releaseId);
     if ((await cache.match(marker)) !== undefined) await cache.delete(marker);
 
@@ -401,7 +474,7 @@ export async function cacheVisionRelease(
   } catch (error) {
     if (mutationStarted && cache !== undefined) {
       try {
-        await dependencies.cacheStorage.delete(cacheName);
+        await deleteOwnedCache(cacheName, dependencies);
       } catch {
         // Preserve the original bounded cache/integrity failure.
       }
@@ -428,8 +501,7 @@ export async function matchCompletedVisionAsset(
 ): Promise<Response | undefined> {
   if (releaseId !== dependencies.manifest.releaseId) return undefined;
   const cacheName = visionCacheName(releaseId);
-  const cache = await dependencies.cacheStorage.open(cacheName);
-  const state = await inspectCompletedCache(cache, dependencies);
+  const { cache, state } = await inspectCompletedCache(cacheName, dependencies);
   if (state === "missing") return undefined;
   if (state === "integrity-failed") {
     await deleteCorruptRelease(cacheName, dependencies);

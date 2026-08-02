@@ -54,7 +54,7 @@ interface CacheControl {
     | undefined;
   client: VisionCacheClient;
   finishCache: (result: "ready" | "error" | "integrity-failed") => void;
-  queryResult: "ready" | "missing" | "integrity-failed";
+  queryResult: "ready" | "missing" | "integrity-failed" | "indeterminate";
 }
 
 function createCache(): CacheControl {
@@ -263,6 +263,37 @@ describe("VisionCoordinator", () => {
       retryAvailable: false,
     });
   });
+
+  it.each(["indeterminate", "thrown failure"] as const)(
+    "fails closed on an %s cache query before any startup work",
+    async (failure) => {
+      const cache = createCache();
+      if (failure === "indeterminate") {
+        cache.queryResult = "indeterminate";
+      } else {
+        cache.client.queryRelease = vi.fn(async () => {
+          throw new Error("private query failure");
+        });
+      }
+      const harness = createHarness({
+        cacheClient: cache.client,
+        canFetchManifest: vi.fn(async () => false),
+      });
+
+      await expect(harness.coordinator.prepare()).resolves.toBe("failed");
+
+      expect(harness.dependencies.canFetchManifest).not.toHaveBeenCalled();
+      expect(cache.client.cacheRelease).not.toHaveBeenCalled();
+      expect(harness.dependencies.createWorker).not.toHaveBeenCalled();
+      expect(harness.snapshot()).toMatchObject({
+        runtime: "error",
+        offlineCache: "error",
+        reason: "offline-cache-failed",
+        retryAvailable: true,
+      });
+      expect(JSON.stringify(harness.snapshot())).not.toContain("private");
+    },
+  );
 
   it("routes first-population integrity failure to fatal recovery before worker start", async () => {
     const cache = createCache();
@@ -687,7 +718,11 @@ describe("VisionCoordinator", () => {
     const WorkerConstructor = vi.fn(() => new FakeWorker());
     vi.stubGlobal("fetch", fetchManifest);
     vi.stubGlobal("Worker", WorkerConstructor);
-    const coordinator = createBrowserVisionCoordinator();
+    const cache = createCache();
+    cache.queryResult = "missing";
+    const coordinator = createBrowserVisionCoordinator(
+      Promise.resolve(cache.client),
+    );
 
     await expect(coordinator.prepare()).resolves.toBe("first-use-offline");
 
@@ -726,7 +761,11 @@ describe("VisionCoordinator", () => {
     const WorkerConstructor = vi.fn(() => new FakeWorker());
     vi.stubGlobal("fetch", fetchManifest);
     vi.stubGlobal("Worker", WorkerConstructor);
-    const coordinator = createBrowserVisionCoordinator();
+    const cache = createCache();
+    cache.queryResult = "missing";
+    const coordinator = createBrowserVisionCoordinator(
+      Promise.resolve(cache.client),
+    );
 
     await expect(coordinator.prepare()).resolves.toBe("first-use-offline");
 

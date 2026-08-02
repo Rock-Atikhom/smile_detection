@@ -2,6 +2,7 @@ import {
   registerApplicationServiceWorker,
   type VisionCacheClient,
   type VisionCachePreparationResult,
+  type VisionCacheQueryResult,
 } from "../service-worker/client";
 import type { VisionReleaseManifest } from "./manifest";
 import {
@@ -176,16 +177,29 @@ export class VisionCoordinator {
   private async runPreflight(
     active: ActivePreflight,
   ): Promise<VisionStartResult> {
-    let cacheState: "ready" | "missing" | "integrity-failed";
+    let cacheState: VisionCacheQueryResult;
     try {
       cacheState = await this.dependencies.cacheClient.queryRelease({
         generation: active.generation,
         releaseId: this.dependencies.manifest.releaseId,
       });
     } catch {
-      cacheState = "missing";
+      cacheState = "indeterminate";
     }
     if (!this.isCurrentPreflight(active)) return "failed";
+
+    if (cacheState === "indeterminate") {
+      this.activePreflight = undefined;
+      this.publish({
+        offlineCache: "error",
+        phase: null,
+        reason: "offline-cache-failed",
+        retryAvailable: true,
+        runtime: "error",
+        wasmTier: "unknown",
+      });
+      return "failed";
+    }
 
     if (cacheState === "integrity-failed") {
       this.activePreflight = undefined;

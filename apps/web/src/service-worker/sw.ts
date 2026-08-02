@@ -10,6 +10,8 @@ import { VisionAssetError } from "../vision/integrity";
 import { VISION_MANIFEST } from "../vision/release";
 import {
   isVisionCacheCommand,
+  isVisionServiceWorkerHandshakeCommand,
+  VISION_SERVICE_WORKER_PROTOCOL,
   type VisionCacheCommand,
   type VisionCacheEvent,
 } from "../vision/protocol";
@@ -168,11 +170,25 @@ const dependencies: VisionCacheDependencies = {
 };
 
 cleanupOutdatedCaches();
+void self.skipWaiting();
 clientsClaim();
 precacheAndRoute(self.__WB_MANIFEST);
 
 self.addEventListener("message", (event) => {
-  if (!isVisionCacheCommand(event.data) || event.source === null) return;
+  if (event.source === null) return;
+  if (isVisionServiceWorkerHandshakeCommand(event.data)) {
+    try {
+      event.source.postMessage({
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: event.data.requestId,
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      });
+    } catch {
+      // The page-side handshake timeout is the fail-closed boundary.
+    }
+    return;
+  }
+  if (!isVisionCacheCommand(event.data)) return;
   event.waitUntil(
     handleCacheCommand(
       event.data,

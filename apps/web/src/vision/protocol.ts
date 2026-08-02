@@ -1,6 +1,21 @@
 export type VisionWasmTier = "unknown" | "simd" | "baseline";
 export type VisionRuntimeState = "idle" | "preparing" | "ready" | "error";
 export type VisionOfflineState = "not-ready" | "caching" | "ready" | "error";
+export const VISION_SERVICE_WORKER_PROTOCOL =
+  "smart-smile-vision-sw-v1" as const;
+
+export type VisionServiceWorkerHandshakeCommand = {
+  type: "VISION_SW_HANDSHAKE";
+  requestId: string;
+  protocol: typeof VISION_SERVICE_WORKER_PROTOCOL;
+};
+
+export type VisionServiceWorkerHandshakeEvent = {
+  type: "VISION_SW_HANDSHAKE_ACK";
+  requestId: string;
+  protocol: typeof VISION_SERVICE_WORKER_PROTOCOL;
+};
+
 export type VisionReason =
   | "first-use-offline"
   | "runtime-download-failed"
@@ -164,6 +179,28 @@ export function isVisionRequestId(value: unknown): value is string {
 
 export function isVisionReason(value: unknown): value is VisionReason {
   return typeof value === "string" && REASONS.includes(value as VisionReason);
+}
+
+export function isVisionServiceWorkerHandshakeCommand(
+  value: unknown,
+): value is VisionServiceWorkerHandshakeCommand {
+  return (
+    isExactDataObject(value, ["type", "requestId", "protocol"]) &&
+    value.type === "VISION_SW_HANDSHAKE" &&
+    isVisionRequestId(value.requestId) &&
+    value.protocol === VISION_SERVICE_WORKER_PROTOCOL
+  );
+}
+
+export function isVisionServiceWorkerHandshakeEvent(
+  value: unknown,
+): value is VisionServiceWorkerHandshakeEvent {
+  return (
+    isExactDataObject(value, ["type", "requestId", "protocol"]) &&
+    value.type === "VISION_SW_HANDSHAKE_ACK" &&
+    isVisionRequestId(value.requestId) &&
+    value.protocol === VISION_SERVICE_WORKER_PROTOCOL
+  );
 }
 
 function messageType(value: unknown): string | undefined {

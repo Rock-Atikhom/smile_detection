@@ -1,13 +1,82 @@
 import { describe, expect, it } from "vitest";
 import {
+  isVisionServiceWorkerHandshakeCommand,
+  isVisionServiceWorkerHandshakeEvent,
   isVisionCacheCommand,
   isVisionCacheEvent,
   isVisionWorkerCommand,
   isVisionWorkerEvent,
+  VISION_SERVICE_WORKER_PROTOCOL,
 } from "./protocol";
 
 const releaseId = "0123456789abcdef";
 const manifestUrl = "/assets/release-manifest.json";
+
+describe("vision service worker handshake guards", () => {
+  it("accepts only the exact current handshake command and reply", () => {
+    expect(
+      isVisionServiceWorkerHandshakeCommand({
+        type: "VISION_SW_HANDSHAKE",
+        requestId: "handshake-42",
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      }),
+    ).toBe(true);
+    expect(
+      isVisionServiceWorkerHandshakeEvent({
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: "handshake-42",
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      "a version mismatch",
+      {
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: "handshake-42",
+        protocol: "smart-smile-vision-sw-v0",
+      },
+    ],
+    [
+      "an unexpected field",
+      {
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: "handshake-42",
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+        unsafe: true,
+      },
+    ],
+    [
+      "a malformed request ID",
+      {
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: "../handshake",
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      },
+    ],
+  ])("rejects %s in a handshake reply", (_description, event) => {
+    expect(isVisionServiceWorkerHandshakeEvent(event)).toBe(false);
+  });
+
+  it("does not confuse handshake directions", () => {
+    expect(
+      isVisionServiceWorkerHandshakeCommand({
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: "handshake-42",
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      }),
+    ).toBe(false);
+    expect(
+      isVisionServiceWorkerHandshakeEvent({
+        type: "VISION_SW_HANDSHAKE",
+        requestId: "handshake-42",
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("vision worker protocol guards", () => {
   it("accepts the documented READY worker event", () => {

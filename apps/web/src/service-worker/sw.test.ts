@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VisionAssetError } from "../vision/integrity";
 import { VISION_MANIFEST } from "../vision/release";
-import type { VisionCacheEvent } from "../vision/protocol";
+import {
+  VISION_SERVICE_WORKER_PROTOCOL,
+  type VisionCacheEvent,
+  type VisionServiceWorkerHandshakeEvent,
+} from "../vision/protocol";
 
 const mocks = vi.hoisted(() => ({
   cacheVisionRelease: vi.fn(),
@@ -50,6 +54,7 @@ async function loadWorker() {
     }),
     location: { href: "https://app.test/sw.js", origin: "https://app.test" },
     registration: { scope: "https://app.test/" },
+    skipWaiting: vi.fn(async () => undefined),
   };
   vi.stubGlobal("self", workerScope);
   await import("./sw");
@@ -60,7 +65,8 @@ async function dispatchMessage(
   listener: Listener,
   data: unknown,
 ): Promise<VisionCacheEvent[]> {
-  const replies: VisionCacheEvent[] = [];
+  const replies: Array<VisionCacheEvent | VisionServiceWorkerHandshakeEvent> =
+    [];
   let work: Promise<unknown> | undefined;
   listener({
     data,
@@ -70,7 +76,7 @@ async function dispatchMessage(
     },
   } as never);
   await work;
-  return replies;
+  return replies as VisionCacheEvent[];
 }
 
 const releaseId = "0123456789abcdef";
@@ -94,6 +100,28 @@ describe("vision service worker", () => {
     );
     expect(mocks.cacheVisionRelease).not.toHaveBeenCalled();
     expect(mocks.clientsClaim).toHaveBeenCalledOnce();
+    expect(workerScope.skipWaiting).toHaveBeenCalledOnce();
+  });
+
+  it("answers the exact current handshake without touching vision cache state", async () => {
+    const { listeners } = await loadWorker();
+
+    const replies = await dispatchMessage(listeners.get("message")!, {
+      type: "VISION_SW_HANDSHAKE",
+      requestId: "handshake-4",
+      protocol: VISION_SERVICE_WORKER_PROTOCOL,
+    });
+
+    expect(replies).toEqual([
+      {
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: "handshake-4",
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      },
+    ]);
+    expect(mocks.queryVisionRelease).not.toHaveBeenCalled();
+    expect(mocks.cacheVisionRelease).not.toHaveBeenCalled();
+    expect(mocks.matchCompletedVisionAsset).not.toHaveBeenCalled();
   });
 
   it("replies CACHE_CACHING then CACHE_READY for explicit caching", async () => {

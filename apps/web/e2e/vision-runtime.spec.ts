@@ -402,6 +402,7 @@ test("deletes an offline corrupt completed cache and blocks camera", async ({
     };
   });
   let page = await context.newPage();
+  const serviceWorkerDevtools = await context.newCDPSession(page);
   try {
     await page.goto("/");
     await page.getByRole("button", { name: "Continue to camera" }).click();
@@ -418,6 +419,8 @@ test("deletes an offline corrupt completed cache and blocks camera", async ({
     );
 
     await context.setOffline(true);
+    await serviceWorkerDevtools.send("ServiceWorker.enable");
+    await serviceWorkerDevtools.send("ServiceWorker.stopAllWorkers");
     await page.close();
     page = await context.newPage();
     await page.goto("/");
