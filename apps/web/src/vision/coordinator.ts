@@ -488,17 +488,19 @@ export class VisionCoordinator {
   }
 }
 
+export type VisionCacheClientProvider = () => Promise<VisionCacheClient>;
+
 function deferredCacheClient(
-  client: Promise<VisionCacheClient>,
+  provider: VisionCacheClientProvider,
 ): VisionCacheClient {
   return {
     cacheRelease: (request, onState) =>
-      client.then((resolved) => resolved.cacheRelease(request, onState)),
+      provider().then((resolved) => resolved.cacheRelease(request, onState)),
     cancel(request) {
-      void client.then((resolved) => resolved.cancel(request));
+      void provider().then((resolved) => resolved.cancel(request));
     },
     queryRelease: (request) =>
-      client.then((resolved) => resolved.queryRelease(request)),
+      provider().then((resolved) => resolved.queryRelease(request)),
   };
 }
 
@@ -516,9 +518,15 @@ function createNetworkProbeUrl(manifestUrl: string): URL | undefined {
 }
 
 export function createBrowserVisionCoordinator(
-  registeredCacheClient: Promise<VisionCacheClient> = registerApplicationServiceWorker(),
+  registeredCacheClient:
+    | Promise<VisionCacheClient>
+    | VisionCacheClientProvider = registerApplicationServiceWorker,
 ): VisionCoordinator {
-  const cacheClient = deferredCacheClient(registeredCacheClient);
+  const cacheClient = deferredCacheClient(
+    typeof registeredCacheClient === "function"
+      ? registeredCacheClient
+      : () => registeredCacheClient,
+  );
   return new VisionCoordinator({
     cacheClient,
     canFetchManifest: async (manifestUrl, signal) => {

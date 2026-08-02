@@ -57,8 +57,13 @@ export interface RegisterServiceWorkerDependencies {
 interface PendingRequest {
   generation: number;
   releaseId: string;
+  fail(): void;
   receive(event: VisionCacheEvent): boolean;
   timeout: ReturnType<typeof setTimeout>;
+}
+
+interface ManagedVisionCacheClient extends VisionCacheClient {
+  isCurrent(): boolean;
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -85,11 +90,34 @@ function degradedClient(): VisionCacheClient {
 function createVisionCacheClient(
   serviceWorker: ServiceWorkerLike,
   container: ServiceWorkerContainerLike,
-): VisionCacheClient {
+): ManagedVisionCacheClient {
   const pending = new Map<string, PendingRequest>();
+  let invalidated = false;
 
-  container.addEventListener("message", (messageEvent) => {
+  const cleanupPending = (requestId: string, request: PendingRequest) => {
+    clearTimeout(request.timeout);
+    pending.delete(requestId);
+  };
+  const invalidate = () => {
+    if (invalidated) return;
+    invalidated = true;
+    container.removeEventListener("message", receiveMessage);
+    container.removeEventListener("controllerchange", receiveControllerChange);
+    for (const [requestId, request] of pending) {
+      cleanupPending(requestId, request);
+      request.fail();
+    }
+  };
+  const receiveControllerChange = () => {
+    if (container.controller !== serviceWorker) invalidate();
+  };
+  const receiveMessage = (messageEvent: MessageEvent<unknown>) => {
+    if (container.controller !== serviceWorker) {
+      invalidate();
+      return;
+    }
     if (
+      invalidated ||
       messageEvent.source !== (serviceWorker as unknown as MessageEventSource)
     ) {
       return;
@@ -105,12 +133,19 @@ function createVisionCacheClient(
       return;
     }
     if (request.receive(event)) {
-      clearTimeout(request.timeout);
-      pending.delete(event.requestId);
+      cleanupPending(event.requestId, request);
     }
-  });
+  };
+
+  container.addEventListener("message", receiveMessage);
+  container.addEventListener("controllerchange", receiveControllerChange);
+  receiveControllerChange();
 
   function post(command: VisionCacheCommand): boolean {
+    if (invalidated || container.controller !== serviceWorker) {
+      invalidate();
+      return false;
+    }
     try {
       serviceWorker.postMessage(command);
       return true;
@@ -134,6 +169,7 @@ function createVisionCacheClient(
         pending.set(requestId, {
           generation: request.generation,
           releaseId: request.releaseId,
+          fail,
           timeout,
           receive(event) {
             switch (event.type) {
@@ -160,9 +196,11 @@ function createVisionCacheClient(
           },
         });
         if (!post({ type: "CACHE_RELEASE", requestId, ...request })) {
-          clearTimeout(timeout);
-          pending.delete(requestId);
-          fail();
+          const active = pending.get(requestId);
+          if (active !== undefined) {
+            cleanupPending(requestId, active);
+            fail();
+          }
         }
       });
     },
@@ -179,6 +217,7 @@ function createVisionCacheClient(
         pending.set(requestId, {
           generation: request.generation,
           releaseId: request.releaseId,
+          fail: () => resolve("indeterminate"),
           timeout,
           receive(event) {
             if (event.type === "CACHE_READY") {
@@ -204,24 +243,57 @@ function createVisionCacheClient(
           },
         });
         if (!post({ type: "QUERY_RELEASE", requestId, ...request })) {
-          clearTimeout(timeout);
-          pending.delete(requestId);
-          resolve("indeterminate");
+          const active = pending.get(requestId);
+          if (active !== undefined) {
+            cleanupPending(requestId, active);
+            resolve("indeterminate");
+          }
         }
       });
+    },
+    isCurrent() {
+      return !invalidated && container.controller === serviceWorker;
     },
   };
 }
 
+let productionClient: ManagedVisionCacheClient | undefined;
 let productionClientPromise: Promise<VisionCacheClient> | undefined;
+
+function completesBeforeDeadline(
+  operation: PromiseLike<unknown>,
+  deadline: number,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (completed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(completed);
+    };
+    const timeout = setTimeout(
+      () => finish(false),
+      Math.max(0, deadline - Date.now()),
+    );
+    Promise.resolve(operation).then(
+      () => finish(true),
+      () => finish(false),
+    );
+  });
+}
 
 async function waitForVerifiedController(
   serviceWorker: ServiceWorkerContainerLike,
+  deadline: number,
 ): Promise<ServiceWorkerLike | undefined> {
   return new Promise((resolve) => {
+    let settled = false;
     let candidate: ServiceWorkerLike | undefined;
     let handshakeRequestId: string | undefined;
     const finish = (worker: ServiceWorkerLike | undefined) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
       serviceWorker.removeEventListener("controllerchange", onControllerChange);
       serviceWorker.removeEventListener("message", onMessage);
@@ -262,7 +334,10 @@ async function waitForVerifiedController(
     const onControllerChange = () => {
       probeController();
     };
-    const timeout = setTimeout(() => finish(undefined), REQUEST_TIMEOUT_MS);
+    const timeout = setTimeout(
+      () => finish(undefined),
+      Math.max(0, deadline - Date.now()),
+    );
     serviceWorker.addEventListener("message", onMessage);
     serviceWorker.addEventListener("controllerchange", onControllerChange);
     probeController();
@@ -271,30 +346,63 @@ async function waitForVerifiedController(
 
 async function createApplicationServiceWorkerClient(
   dependencies: RegisterServiceWorkerDependencies,
-): Promise<VisionCacheClient> {
+): Promise<ManagedVisionCacheClient | undefined> {
+  const deadline = Date.now() + REQUEST_TIMEOUT_MS;
   const serviceWorker =
     dependencies.serviceWorker ??
     ("serviceWorker" in navigator
       ? (navigator.serviceWorker as unknown as ServiceWorkerContainerLike)
       : undefined);
-  if (serviceWorker === undefined) return degradedClient();
+  if (serviceWorker === undefined) return undefined;
 
   try {
-    await serviceWorker.register("/sw.js");
-    const controller = await waitForVerifiedController(serviceWorker);
-    if (controller === undefined) return degradedClient();
-    return createVisionCacheClient(controller, serviceWorker);
+    if (
+      !(await completesBeforeDeadline(
+        serviceWorker.register("/sw.js"),
+        deadline,
+      ))
+    ) {
+      return undefined;
+    }
+    const controller = await waitForVerifiedController(serviceWorker, deadline);
+    if (controller === undefined || serviceWorker.controller !== controller) {
+      return undefined;
+    }
+    const client = createVisionCacheClient(controller, serviceWorker);
+    return client.isCurrent() ? client : undefined;
   } catch {
-    return degradedClient();
+    return undefined;
   }
+}
+
+function acquireProductionServiceWorkerClient(): Promise<VisionCacheClient> {
+  if (productionClient?.isCurrent() === true) {
+    return Promise.resolve(productionClient);
+  }
+  productionClient = undefined;
+  if (productionClientPromise !== undefined) return productionClientPromise;
+
+  const acquisition = createApplicationServiceWorkerClient({})
+    .then((client) => {
+      if (client?.isCurrent() === true) productionClient = client;
+      return client ?? degradedClient();
+    })
+    .finally(() => {
+      if (productionClientPromise === acquisition) {
+        productionClientPromise = undefined;
+      }
+    });
+  productionClientPromise = acquisition;
+  return acquisition;
 }
 
 export function registerApplicationServiceWorker(
   dependencies?: RegisterServiceWorkerDependencies,
 ): Promise<VisionCacheClient> {
   if (dependencies !== undefined) {
-    return createApplicationServiceWorkerClient(dependencies);
+    return createApplicationServiceWorkerClient(dependencies).then(
+      (client) => client ?? degradedClient(),
+    );
   }
-  productionClientPromise ??= createApplicationServiceWorkerClient({});
-  return productionClientPromise;
+  return acquireProductionServiceWorkerClient();
 }

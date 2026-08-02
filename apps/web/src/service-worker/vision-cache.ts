@@ -341,10 +341,13 @@ async function inspectCompletedCache(
     const verified = await verification;
     if (signal !== undefined) ensureNotCancelled(signal);
     if (trustGeneration(cacheName, dependencies) !== generation) continue;
-    if (!verified) generation.inventoryVerification = undefined;
+    if (!verified) {
+      invalidateCacheTrust(cacheName, dependencies);
+      return { cache, state: "integrity-failed" };
+    }
     return {
       cache,
-      state: verified ? "ready" : "integrity-failed",
+      state: "ready",
     };
   }
 }

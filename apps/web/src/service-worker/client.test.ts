@@ -65,9 +65,13 @@ class FakeServiceWorkerContainer {
     }
   }
 
-  claim() {
-    this.controller = this.worker;
+  changeController(controller: typeof this.worker | null) {
+    this.controller = controller;
     for (const listener of this.controllerListeners) listener();
+  }
+
+  claim() {
+    this.changeController(this.worker);
   }
 
   dispatch(data: VisionCacheEvent | unknown, source: unknown = this.worker) {
@@ -150,6 +154,57 @@ describe("VisionCacheClient", () => {
     await expect(pendingQuery).resolves.toBe("ready");
   });
 
+  it("ignores an old acknowledgement after controllerchange and proves the replacement", async () => {
+    const serviceWorker = new FakeServiceWorkerContainer();
+    serviceWorker.autoHandshake = false;
+    const oldController = serviceWorker.worker;
+    const replacementMessages: Array<
+      VisionCacheCommand | VisionServiceWorkerHandshakeCommand
+    > = [];
+    const replacement = {
+      postMessage: vi.fn(
+        (message: VisionCacheCommand | VisionServiceWorkerHandshakeCommand) => {
+          replacementMessages.push(message);
+        },
+      ),
+    } as typeof serviceWorker.worker;
+    let settled = false;
+    const pendingClient = registerApplicationServiceWorker({ serviceWorker });
+    void pendingClient.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const oldHandshake = serviceWorker.handshakes[0]!;
+
+    serviceWorker.changeController(replacement);
+    serviceWorker.dispatch(
+      {
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: oldHandshake.requestId,
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      },
+      oldController,
+    );
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    const replacementHandshake = replacementMessages[0]!;
+    expect(replacementHandshake).toMatchObject({
+      type: "VISION_SW_HANDSHAKE",
+      protocol: VISION_SERVICE_WORKER_PROTOCOL,
+    });
+    serviceWorker.dispatch(
+      {
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: replacementHandshake.requestId,
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      },
+      replacement,
+    );
+    await expect(pendingClient).resolves.toBeDefined();
+  });
+
   it("rejects malformed or version-mismatched controller proof and times out as indeterminate", async () => {
     vi.useFakeTimers();
     const serviceWorker = new FakeServiceWorkerContainer();
@@ -181,14 +236,16 @@ describe("VisionCacheClient", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("bounds controller selection even when service-worker ready never settles", async () => {
+  it("bounds the full acquisition when service-worker registration never settles", async () => {
     vi.useFakeTimers();
     const serviceWorker = new FakeServiceWorkerContainer();
-    serviceWorker.controller = null;
-    Object.defineProperty(serviceWorker, "ready", {
-      configurable: true,
-      value: new Promise(() => undefined),
-    });
+    let finishRegistration!: (value: { installing: object }) => void;
+    serviceWorker.register.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRegistration = resolve;
+        }),
+    );
     const pendingClient = registerApplicationServiceWorker({ serviceWorker });
     let settled = false;
     void pendingClient.then(() => {
@@ -204,10 +261,13 @@ describe("VisionCacheClient", () => {
     await expect(
       client.queryRelease({ generation: 3, releaseId }),
     ).resolves.toBe("indeterminate");
+    expect(serviceWorker.handshakes).toEqual([]);
     expect(vi.getTimerCount()).toBe(0);
+    finishRegistration({ installing: {} });
+    await Promise.resolve();
   });
 
-  it("waits for ready and uses only its active worker", async () => {
+  it("registers and uses only the controlling worker", async () => {
     const serviceWorker = new FakeServiceWorkerContainer();
     const client = await registerApplicationServiceWorker({ serviceWorker });
     const pending = client.queryRelease({ generation: 3, releaseId });
@@ -363,6 +423,53 @@ describe("VisionCacheClient", () => {
     await expect(pending).resolves.toBe("ready");
   });
 
+  it("invalidates in-flight work when the selected worker loses control", async () => {
+    const serviceWorker = new FakeServiceWorkerContainer();
+    const oldController = serviceWorker.worker;
+    const client = await registerApplicationServiceWorker({ serviceWorker });
+    const states: VisionCachePreparationState[] = [];
+    const pendingQuery = client.queryRelease({ generation: 3, releaseId });
+    const pendingCache = client.cacheRelease(
+      { generation: 3, manifestUrl, releaseId },
+      (state) => states.push(state),
+    );
+    const query = serviceWorker.posted.find(
+      (command) => command.type === "QUERY_RELEASE",
+    )!;
+    const cache = serviceWorker.posted.find(
+      (command) => command.type === "CACHE_RELEASE",
+    )!;
+    const replacement = {
+      postMessage: vi.fn(),
+    } as unknown as typeof serviceWorker.worker;
+
+    serviceWorker.changeController(replacement);
+    serviceWorker.dispatch(
+      {
+        type: "CACHE_READY",
+        requestId: query.requestId,
+        generation: 3,
+        releaseId,
+      },
+      oldController,
+    );
+    serviceWorker.dispatch(
+      {
+        type: "CACHE_READY",
+        requestId: cache.requestId,
+        generation: 3,
+        releaseId,
+      },
+      oldController,
+    );
+
+    await expect(pendingQuery).resolves.toBe("indeterminate");
+    await expect(pendingCache).resolves.toBe("error");
+    expect(states).toEqual(["error"]);
+    expect(serviceWorker.listeners.size).toBe(0);
+    expect(serviceWorker.controllerListeners.size).toBe(0);
+  });
+
   it("reports caching and ready states for an explicit cache request", async () => {
     const serviceWorker = new FakeServiceWorkerContainer();
     const client = await registerApplicationServiceWorker({ serviceWorker });
@@ -502,8 +609,10 @@ describe("VisionCacheClient", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("shares one production registration promise without coupling injected clients", async () => {
+  it("shares an acquisition attempt but retries after failure and caches only verified clients", async () => {
+    vi.useFakeTimers();
     const production = new FakeServiceWorkerContainer();
+    production.autoHandshake = false;
     Object.defineProperty(navigator, "serviceWorker", {
       configurable: true,
       value: production,
@@ -513,13 +622,36 @@ describe("VisionCacheClient", () => {
     const second = registerApplicationServiceWorker();
 
     expect(second).toBe(first);
-    await expect(first).resolves.toBeDefined();
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(15_000);
+    const degraded = await first;
+    await expect(
+      degraded.queryRelease({ generation: 4, releaseId }),
+    ).resolves.toBe("indeterminate");
     expect(production.register).toHaveBeenCalledOnce();
-    expect(production.listeners.size).toBe(1);
+
+    production.autoHandshake = true;
+    production.changeController(null);
+    production.claim();
+    const recovered = await registerApplicationServiceWorker();
+    const pending = recovered.queryRelease({ generation: 4, releaseId });
+    const query = production.posted[0]!;
+    production.dispatch({
+      type: "CACHE_READY",
+      requestId: query.requestId,
+      generation: 4,
+      releaseId,
+    });
+    await expect(pending).resolves.toBe("ready");
+    expect(production.register).toHaveBeenCalledTimes(2);
+
+    await registerApplicationServiceWorker();
+    expect(production.register).toHaveBeenCalledTimes(2);
 
     const injected = new FakeServiceWorkerContainer();
     await registerApplicationServiceWorker({ serviceWorker: injected });
     expect(injected.register).toHaveBeenCalledOnce();
-    expect(production.register).toHaveBeenCalledOnce();
+    expect(production.register).toHaveBeenCalledTimes(2);
   });
 });

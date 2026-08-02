@@ -833,4 +833,42 @@ describe("VisionCoordinator", () => {
     );
     coordinator.dispose();
   });
+
+  it("reacquires the cache client on restart after controller proof recovers", async () => {
+    const unavailable = createCache();
+    unavailable.queryResult = "indeterminate";
+    const recovered = createCache();
+    recovered.queryResult = "ready";
+    const provider = vi
+      .fn<() => Promise<VisionCacheClient>>()
+      .mockResolvedValueOnce(unavailable.client)
+      .mockResolvedValue(recovered.client);
+    const worker = new FakeWorker();
+    vi.stubGlobal(
+      "Worker",
+      vi.fn(function () {
+        return worker;
+      }),
+    );
+    const coordinator = createBrowserVisionCoordinator(provider);
+
+    await expect(coordinator.prepare()).resolves.toBe("failed");
+    expect(coordinator.snapshot).toMatchObject({
+      reason: "offline-cache-failed",
+      retryAvailable: true,
+      runtime: "error",
+    });
+
+    await expect(coordinator.restart()).resolves.toBe("started");
+    expect(provider).toHaveBeenCalledTimes(2);
+    expect(worker.messages).toEqual([
+      {
+        type: "PREPARE",
+        generation: 1,
+        manifestUrl: VISION_MANIFEST_URL,
+        releaseId: VISION_MANIFEST.releaseId,
+      },
+    ]);
+    coordinator.dispose();
+  });
 });

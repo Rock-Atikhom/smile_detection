@@ -566,6 +566,63 @@ describe("vision release cache transaction", () => {
     );
   });
 
+  it("advances failed trust before a delayed concurrent reader can rescan", async () => {
+    const { cacheStorage, dependencies, fetch } = harness();
+    const cache = await seedCompletion(cacheStorage, releaseId, 1, [
+      firstAsset,
+    ]);
+    const originalMatch = cache.match.bind(cache);
+    const secondCompletionReadStarted = deferred<void>();
+    const releaseSecondCompletionRead = deferred<{
+      schemaVersion: 1;
+      releaseId: string;
+      assetCount: number;
+    }>();
+    const delayedCompletionResponse = Response.json({
+      schemaVersion: 1,
+      releaseId,
+      assetCount: 1,
+    });
+    vi.spyOn(delayedCompletionResponse, "json").mockImplementation(() => {
+      secondCompletionReadStarted.resolve();
+      return releaseSecondCompletionRead.promise;
+    });
+    let completionReads = 0;
+    cache.match = vi.fn((request) => {
+      if (requestKey(request) === completionUrl(scope, releaseId)) {
+        completionReads += 1;
+        if (completionReads === 2) {
+          return Promise.resolve(delayedCompletionResponse);
+        }
+      }
+      return originalMatch(request);
+    });
+    const firstVerificationStarted = deferred<void>();
+    const verificationFailure = deferred<Uint8Array>();
+    const verification = vi.fn(() => {
+      firstVerificationStarted.resolve();
+      void verificationFailure.promise.catch(() =>
+        releaseSecondCompletionRead.resolve({
+          schemaVersion: 1,
+          releaseId,
+          assetCount: 1,
+        }),
+      );
+      return verificationFailure.promise;
+    });
+    dependencies.verifyResponse = verification;
+
+    const firstQuery = queryVisionRelease(releaseId, dependencies);
+    await firstVerificationStarted.promise;
+    const delayedQuery = queryVisionRelease(releaseId, dependencies);
+    await secondCompletionReadStarted.promise;
+    verificationFailure.reject(new Error("verification failed"));
+    await Promise.allSettled([firstQuery, delayedQuery]);
+
+    expect(verification).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("starts one fresh full scan after explicit population takes cache ownership", async () => {
     const { cacheStorage, dependencies, fetch } = harness({
       assets: [firstAsset, secondAsset],
