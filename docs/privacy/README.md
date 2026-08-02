@@ -31,8 +31,14 @@ the immutable manifest paths for release `6c23e451b7a9b523` plus its matching
 completion-marker record. That release is MediaPipe runtime/WASM files, the
 Face Landmarker `float16/1` task bundle, the MediaPipe license and notice, and
 the three upstream model cards. The completion marker is written only after
-every required response has been integrity-checked and read back, so a partial
+every manifest response has been integrity-checked and read back, so a partial
 cache is not an offline-ready release.
+
+The runtime starts only from a completed cache whose entire manifest inventory
+verifies. A corrupt completed release is deleted as one cache before fatal
+recovery, and immutable runtime URLs never fall back to network bytes. A storage
+or quota failure prevents camera authorization and exposes only bounded recovery
+state; it never permits an unverified runtime execution path.
 
 First use while offline is intentionally recoverable: a shell-only device is
 told to connect once and is not prompted for a camera. Integrity failure never

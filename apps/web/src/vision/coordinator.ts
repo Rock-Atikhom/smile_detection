@@ -1,6 +1,7 @@
 import {
   registerApplicationServiceWorker,
   type VisionCacheClient,
+  type VisionCachePreparationResult,
 } from "../service-worker/client";
 import type { VisionReleaseManifest } from "./manifest";
 import {
@@ -45,12 +46,12 @@ export interface VisionCoordinatorDependencies {
   manifestUrl: string;
 }
 
-type StartResult = "started" | "first-use-offline";
+export type VisionStartResult = "started" | "first-use-offline" | "failed";
 
 interface ActivePreflight {
   controller: AbortController;
   generation: number;
-  promise: Promise<StartResult>;
+  promise: Promise<VisionStartResult>;
 }
 
 interface ActiveWorker {
@@ -92,8 +93,8 @@ export class VisionCoordinator {
     return this.snapshotValue;
   }
 
-  prepare(): Promise<StartResult> {
-    if (this.disposed) return Promise.resolve("first-use-offline");
+  prepare(): Promise<VisionStartResult> {
+    if (this.disposed) return Promise.resolve("failed");
     if (
       this.activeWorker?.generation === this.snapshotValue.generation &&
       (this.snapshotValue.runtime === "preparing" ||
@@ -110,15 +111,15 @@ export class VisionCoordinator {
     const active = {
       controller,
       generation,
-      promise: Promise.resolve<StartResult>("first-use-offline"),
+      promise: Promise.resolve<VisionStartResult>("failed"),
     };
     this.activePreflight = active;
     active.promise = this.runPreflight(active);
     return active.promise;
   }
 
-  async restart(): Promise<StartResult> {
-    if (this.disposed) return "first-use-offline";
+  async restart(): Promise<VisionStartResult> {
+    if (this.disposed) return "failed";
     this.invalidateCurrent();
     const generation = this.nextGeneration();
     this.publish({
@@ -131,7 +132,7 @@ export class VisionCoordinator {
       runtime: "idle",
       wasmTier: "unknown",
     });
-    if (!this.ownsGeneration(generation)) return "first-use-offline";
+    if (!this.ownsGeneration(generation)) return "failed";
     return this.prepare();
   }
 
@@ -172,20 +173,27 @@ export class VisionCoordinator {
     this.listeners.clear();
   }
 
-  private async runPreflight(active: ActivePreflight): Promise<StartResult> {
-    let cacheReady: boolean;
+  private async runPreflight(
+    active: ActivePreflight,
+  ): Promise<VisionStartResult> {
+    let cacheState: "ready" | "missing" | "integrity-failed";
     try {
-      cacheReady =
-        (await this.dependencies.cacheClient.queryRelease({
-          generation: active.generation,
-          releaseId: this.dependencies.manifest.releaseId,
-        })) === "ready";
+      cacheState = await this.dependencies.cacheClient.queryRelease({
+        generation: active.generation,
+        releaseId: this.dependencies.manifest.releaseId,
+      });
     } catch {
-      cacheReady = false;
+      cacheState = "missing";
     }
-    if (!this.isCurrentPreflight(active)) return "first-use-offline";
+    if (!this.isCurrentPreflight(active)) return "failed";
 
-    let manifestReachable = cacheReady;
+    if (cacheState === "integrity-failed") {
+      this.activePreflight = undefined;
+      this.publishIntegrityFailure();
+      return "failed";
+    }
+
+    let manifestReachable = cacheState === "ready";
     if (!manifestReachable) {
       try {
         manifestReachable =
@@ -197,10 +205,10 @@ export class VisionCoordinator {
         manifestReachable = false;
       }
     }
-    if (!this.isCurrentPreflight(active)) return "first-use-offline";
+    if (!this.isCurrentPreflight(active)) return "failed";
 
-    this.activePreflight = undefined;
     if (!manifestReachable) {
+      this.activePreflight = undefined;
       this.publish({
         offlineCache: "not-ready",
         phase: null,
@@ -212,9 +220,74 @@ export class VisionCoordinator {
       return "first-use-offline";
     }
 
-    return this.startPreparation(active.generation, cacheReady)
-      ? "started"
-      : "first-use-offline";
+    if (cacheState === "missing") {
+      this.publish({
+        offlineCache: "caching",
+        phase: "verifying",
+        reason: null,
+        retryAvailable: false,
+        runtime: "preparing",
+        wasmTier: "unknown",
+      });
+      if (!this.isCurrentPreflight(active)) return "failed";
+
+      const result = await this.populateCache(active);
+      if (!this.isCurrentPreflight(active)) return "failed";
+      if (result !== "ready") {
+        this.activePreflight = undefined;
+        if (result === "integrity-failed") {
+          this.publishIntegrityFailure();
+        } else {
+          this.publish({
+            offlineCache: "error",
+            phase: null,
+            reason: "offline-cache-failed",
+            retryAvailable: true,
+            runtime: "error",
+            wasmTier: "unknown",
+          });
+        }
+        return "failed";
+      }
+      this.publish({ offlineCache: "ready" });
+    }
+
+    this.activePreflight = undefined;
+    return this.startWorker(active.generation) ? "started" : "failed";
+  }
+
+  private async populateCache(
+    active: ActivePreflight,
+  ): Promise<VisionCachePreparationResult> {
+    this.activeCacheGeneration = active.generation;
+    this.cacheStartedGeneration = active.generation;
+    try {
+      return await this.dependencies.cacheClient.cacheRelease(
+        {
+          generation: active.generation,
+          manifestUrl: this.dependencies.manifestUrl,
+          releaseId: this.dependencies.manifest.releaseId,
+        },
+        (state) => {
+          if (
+            state === "caching" &&
+            this.isCurrentPreflight(active) &&
+            this.activeCacheGeneration === active.generation
+          ) {
+            this.publish({ offlineCache: "caching" });
+          }
+        },
+      );
+    } catch {
+      return "error";
+    } finally {
+      if (this.activeCacheGeneration === active.generation) {
+        this.activeCacheGeneration = undefined;
+      }
+      if (this.cacheStartedGeneration === active.generation) {
+        this.cacheStartedGeneration = undefined;
+      }
+    }
   }
 
   private isCurrentPreflight(active: ActivePreflight): boolean {
@@ -226,21 +299,19 @@ export class VisionCoordinator {
     );
   }
 
-  private startPreparation(generation: number, cacheReady: boolean): boolean {
+  private startWorker(generation: number): boolean {
     let worker: VisionWorkerPort;
     try {
       worker = this.dependencies.createWorker();
     } catch {
       this.publish({
-        offlineCache: cacheReady ? "ready" : "caching",
+        offlineCache: "ready",
         runtime: "error",
         phase: null,
         reason: "runtime-initialization-failed",
         retryAvailable: true,
       });
-      if (!this.ownsGeneration(generation)) return false;
-      this.startCacheLane(generation);
-      return this.ownsGeneration(generation);
+      return false;
     }
 
     const active: ActiveWorker = {
@@ -252,7 +323,7 @@ export class VisionCoordinator {
     this.activeWorker = active;
     worker.addEventListener("message", active.listener);
     this.publish({
-      offlineCache: cacheReady ? "ready" : "caching",
+      offlineCache: "ready",
       phase: "verifying",
       reason: null,
       retryAvailable: false,
@@ -276,34 +347,25 @@ export class VisionCoordinator {
         retryAvailable: true,
         runtime: "error",
       });
+      return false;
     }
 
-    if (!this.ownsGeneration(generation)) return false;
-    this.startCacheLane(generation);
-    return this.ownsGeneration(generation);
+    return (
+      this.ownsWorker(active) &&
+      (this.snapshotValue.runtime === "preparing" ||
+        this.snapshotValue.runtime === "ready")
+    );
   }
 
-  private startCacheLane(generation: number): void {
-    if (!this.ownsGeneration(generation)) return;
-    this.activeCacheGeneration = generation;
-    this.cacheStartedGeneration = generation;
-    let cachePromise: Promise<"ready" | "error">;
-    try {
-      cachePromise = this.dependencies.cacheClient.cacheRelease(
-        {
-          generation,
-          manifestUrl: this.dependencies.manifestUrl,
-          releaseId: this.dependencies.manifest.releaseId,
-        },
-        (state) => this.receiveCacheState(generation, state),
-      );
-    } catch {
-      this.receiveCacheState(generation, "error");
-      return;
-    }
-    void cachePromise
-      .then((result) => this.receiveCacheState(generation, result))
-      .catch(() => this.receiveCacheState(generation, "error"));
+  private publishIntegrityFailure(): void {
+    this.publish({
+      offlineCache: "error",
+      phase: null,
+      reason: "runtime-integrity-failed",
+      retryAvailable: false,
+      runtime: "error",
+      wasmTier: "unknown",
+    });
   }
 
   private ownsGeneration(generation: number): boolean {
@@ -338,11 +400,8 @@ export class VisionCoordinator {
       active.settled = true;
       this.publish({
         phase: null,
-        reason:
-          this.snapshotValue.reason === "offline-cache-failed"
-            ? "offline-cache-failed"
-            : null,
-        retryAvailable: this.snapshotValue.reason === "offline-cache-failed",
+        reason: null,
+        retryAvailable: false,
         runtime: "ready",
         wasmTier: value.wasmTier,
       });
@@ -365,50 +424,6 @@ export class VisionCoordinator {
       wasmTier: "unknown",
     });
     this.closeWorker(active);
-  }
-
-  private receiveCacheState(
-    generation: number,
-    state: "caching" | "ready" | "error",
-  ): void {
-    if (
-      this.disposed ||
-      this.activeCacheGeneration !== generation ||
-      this.snapshotValue.generation !== generation
-    ) {
-      return;
-    }
-    if (state === "caching") {
-      if (this.snapshotValue.offlineCache !== "ready") {
-        this.publish({ offlineCache: "caching" });
-      }
-      return;
-    }
-
-    this.activeCacheGeneration = undefined;
-    if (state === "ready") {
-      this.publish({
-        offlineCache: "ready",
-        reason:
-          this.snapshotValue.reason === "offline-cache-failed"
-            ? null
-            : this.snapshotValue.reason,
-        retryAvailable:
-          this.snapshotValue.reason === "offline-cache-failed"
-            ? false
-            : this.snapshotValue.retryAvailable,
-      });
-      return;
-    }
-
-    this.publish({
-      offlineCache: "error",
-      reason:
-        this.snapshotValue.runtime === "error"
-          ? this.snapshotValue.reason
-          : "offline-cache-failed",
-      retryAvailable: true,
-    });
   }
 
   private invalidateCurrent(): void {
@@ -486,8 +501,10 @@ function createNetworkProbeUrl(manifestUrl: string): URL | undefined {
   return url;
 }
 
-export function createBrowserVisionCoordinator(): VisionCoordinator {
-  const cacheClient = deferredCacheClient(registerApplicationServiceWorker());
+export function createBrowserVisionCoordinator(
+  registeredCacheClient: Promise<VisionCacheClient> = registerApplicationServiceWorker(),
+): VisionCoordinator {
+  const cacheClient = deferredCacheClient(registeredCacheClient);
   return new VisionCoordinator({
     cacheClient,
     canFetchManifest: async (manifestUrl, signal) => {

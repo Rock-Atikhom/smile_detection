@@ -29,16 +29,29 @@ const contentTypes = new Map([
   [".wasm", "application/wasm"],
 ]);
 const corruptWasmCookieName = "__smart_smile_e2e_corrupt_wasm";
+const corruptAfterFirstWasmCookieName =
+  "__smart_smile_e2e_corrupt_after_first_wasm";
 const defaultFaultHoldTimeoutMs = 10_000;
 const heldFaultScopes = new Set();
 const heldFaultTimers = new Map();
 const pendingFaultResponses = new Map();
+const corruptAfterFirstRequestCounts = new Map();
 let faultScopeSequence = 0;
 
 function faultScope(request) {
   for (const cookie of (request.headers.cookie ?? "").split(";")) {
     const [name, ...value] = cookie.trim().split("=");
     if (name !== corruptWasmCookieName) continue;
+    const scope = value.join("=");
+    return /^fault-[a-z0-9]+$/.test(scope) ? scope : undefined;
+  }
+  return undefined;
+}
+
+function corruptAfterFirstScope(request) {
+  for (const cookie of (request.headers.cookie ?? "").split(";")) {
+    const [name, ...value] = cookie.trim().split("=");
+    if (name !== corruptAfterFirstWasmCookieName) continue;
     const scope = value.join("=");
     return /^fault-[a-z0-9]+$/.test(scope) ? scope : undefined;
   }
@@ -158,6 +171,47 @@ const server = createServer((request, response) => {
       .end();
     return;
   }
+  if (pathname === "/__e2e__/fault/corrupt-wasm-after-first/on") {
+    const previousScope = corruptAfterFirstScope(request);
+    if (previousScope !== undefined) {
+      corruptAfterFirstRequestCounts.delete(previousScope);
+    }
+    faultScopeSequence += 1;
+    const scope = `fault-${faultScopeSequence.toString(36)}`;
+    corruptAfterFirstRequestCounts.set(scope, new Map());
+    response
+      .writeHead(204, {
+        "Cache-Control": "no-store",
+        "Set-Cookie": `${corruptAfterFirstWasmCookieName}=${scope}; Path=/; HttpOnly; SameSite=Strict`,
+      })
+      .end();
+    return;
+  }
+  if (pathname === "/__e2e__/fault/corrupt-wasm-after-first/status") {
+    const scope = corruptAfterFirstScope(request);
+    const counts = corruptAfterFirstRequestCounts.get(scope);
+    const simdWasmRequests = [...(counts?.entries() ?? [])]
+      .filter(([path]) => path.endsWith("/vision_wasm_internal.wasm"))
+      .reduce((total, [, count]) => total + count, 0);
+    response
+      .writeHead(200, {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json; charset=utf-8",
+      })
+      .end(JSON.stringify({ simdWasmRequests }));
+    return;
+  }
+  if (pathname === "/__e2e__/fault/corrupt-wasm-after-first/off") {
+    const scope = corruptAfterFirstScope(request);
+    if (scope !== undefined) corruptAfterFirstRequestCounts.delete(scope);
+    response
+      .writeHead(204, {
+        "Cache-Control": "no-store",
+        "Set-Cookie": `${corruptAfterFirstWasmCookieName}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+      })
+      .end();
+    return;
+  }
   const requestedPath = pathname === "/" ? "index.html" : pathname.slice(1);
   const filePath = resolve(dist, requestedPath);
 
@@ -185,6 +239,18 @@ const server = createServer((request, response) => {
     sendCorruptResponse(requestFaultScope, response, bytes);
     return;
   }
+  const afterFirstScope = corruptAfterFirstScope(request);
+  if (afterFirstScope !== undefined && extension === ".wasm") {
+    const counts = corruptAfterFirstRequestCounts.get(afterFirstScope);
+    if (counts !== undefined) {
+      const count = (counts.get(pathname) ?? 0) + 1;
+      counts.set(pathname, count);
+      const bytes = Buffer.from(readFileSync(filePath));
+      if (count > 1 && bytes.length > 0) bytes[bytes.length - 1] ^= 1;
+      response.end(bytes);
+      return;
+    }
+  }
   createReadStream(filePath).pipe(response);
 });
 
@@ -197,6 +263,7 @@ server.listen(port, host, () => {
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     drainFaultScopes();
+    corruptAfterFirstRequestCounts.clear();
     server.close(() => process.exit(0));
   });
 }

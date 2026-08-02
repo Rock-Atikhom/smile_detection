@@ -84,7 +84,7 @@ export type VisionCacheEvent =
       requestId: string;
       generation: number;
       releaseId: string;
-      code: "offline-cache-failed";
+      code: "offline-cache-failed" | "runtime-integrity-failed";
     };
 
 const REASONS: readonly VisionReason[] = [
@@ -338,7 +338,8 @@ export function isVisionCacheEvent(value: unknown): value is VisionCacheEvent {
         isVisionRequestId(message.requestId) &&
         isVisionGeneration(message.generation) &&
         isVisionReleaseId(message.releaseId) &&
-        message.code === "offline-cache-failed"
+        (message.code === "offline-cache-failed" ||
+          message.code === "runtime-integrity-failed")
       );
     default:
       return false;

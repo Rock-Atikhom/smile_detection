@@ -4,12 +4,13 @@ import {
   createInitialVisionSnapshot,
   type VisionCoordinator,
   type VisionSnapshot,
+  type VisionStartResult,
 } from "./coordinator";
 
 export interface UseVisionRuntimeResult {
   snapshot: VisionSnapshot;
-  prepare(): Promise<"started" | "first-use-offline">;
-  restart(): Promise<"started" | "first-use-offline">;
+  prepare(): Promise<VisionStartResult>;
+  restart(): Promise<VisionStartResult>;
   cancel(): void;
 }
 

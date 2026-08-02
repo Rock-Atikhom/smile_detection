@@ -374,7 +374,7 @@ test("tracks the complete offline vision architecture boundary", () => {
     files. After **Continue to camera**, the service worker opens a separate
     versioned cache and fetches every manifest allowlisted asset from the same
     origin. It validates HTTP success, byte count, and SHA-256, stores verified
-    responses, reads every required response back, and writes its completion marker
+    responses, reads every manifest response back, and writes its completion marker
     last. Only a matching cache with that marker and successful readback is usable;
     cancellation, a failed download, or an integrity failure deletes the incomplete
     new cache while preserving a previously complete release.`,
@@ -384,6 +384,18 @@ test("tracks the complete offline vision architecture boundary", () => {
     integrity mismatch blocks initialization, removes affected unverified or
     incomplete cache content, stops the camera, and presents safe recovery rather
     than raw runtime details.`,
+    `The service worker claims the current page before runtime preparation, and the
+    cache client sends commands only to that controlling worker. The coordinator
+    constructs the classic vision worker only after the complete release cache has
+    been verified and committed. Immutable vision fetches then have no network
+    fallback: MediaPipe 0.10.35's loader-script and WASM URL requests are served as
+    freshly verified copies from that completed cache.`,
+    `A missing completion marker remains the recoverable first-use state. Once a
+    marker exists, an invalid marker or a missing/corrupt entry anywhere in the
+    manifest deletes the whole release cache and enters fatal integrity recovery.
+    If Cache Storage cannot commit a first release, setup fails closed before worker
+    creation or camera permission and offers a bounded retry instead of running from
+    unverifiable URL refetches.`,
   ]) {
     expectDocumentedClause(architecture, clause);
   }
@@ -412,8 +424,13 @@ test("tracks the complete non-goal and persistence boundary", () => {
     completion-marker record. That release is MediaPipe runtime/WASM files, the
     Face Landmarker \`float16/1\` task bundle, the MediaPipe license and notice, and
     the three upstream model cards. The completion marker is written only after
-    every required response has been integrity-checked and read back, so a partial
+    every manifest response has been integrity-checked and read back, so a partial
     cache is not an offline-ready release.`,
+    `The runtime starts only from a completed cache whose entire manifest inventory
+    verifies. A corrupt completed release is deleted as one cache before fatal
+    recovery, and immutable runtime URLs never fall back to network bytes. A storage
+    or quota failure prevents camera authorization and exposes only bounded recovery
+    state; it never permits an unverified runtime execution path.`,
   ]) {
     expectDocumentedClause(privacy, clause);
   }
@@ -436,6 +453,15 @@ test("tracks the exact CSP, acceptance, and provenance clauses", () => {
     both runtime and offline use report ready; close the browser page; enable airplane
     mode; reopen the page; select **Continue to camera**; then confirm **Camera ready**
     without a network request.`,
+  );
+  expectDocumentedClause(
+    validation,
+    `Production-browser acceptance also corrupts a non-runtime model-card entry in a
+    completed release before offline reopen and verifies whole-cache deletion, fatal
+    focused recovery, and zero camera requests. A separate first-install fault turns
+    network WASM corrupt after its first cache-population response; successful
+    initialization with one server request proves MediaPipe consumes the completed
+    verified cache rather than refetching executable bytes from the network.`,
   );
   expectDocumentedClause(
     notices,

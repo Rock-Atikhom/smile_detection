@@ -445,8 +445,41 @@ describe("vision release cache transaction", () => {
       }),
     );
     await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "integrity-failed",
+    );
+    expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
+  });
+
+  it("keeps a genuinely absent completion marker distinct from corruption", async () => {
+    const { cacheStorage, dependencies } = harness();
+
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
       "missing",
     );
+
+    expect(cacheStorage.deleted).toEqual([]);
+  });
+
+  it("deletes and reports a completed release with a corrupt non-runtime asset", async () => {
+    const optionalNotice = {
+      ...secondAsset,
+      requiredForOffline: false,
+    };
+    const { cacheStorage, dependencies } = harness({
+      assets: [firstAsset, optionalNotice],
+    });
+    const cache = await seedCompletion(cacheStorage, releaseId, 1, [
+      firstAsset,
+      optionalNotice,
+    ]);
+    cache.entries.set(optionalNotice.path, new Response("corrupt"));
+
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "integrity-failed",
+    );
+
+    expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
+    expect(cacheStorage.caches.has(visionCacheName(releaseId))).toBe(false);
   });
 
   it.each([
@@ -455,7 +488,7 @@ describe("vision release cache transaction", () => {
     ["missing required entry", [firstAsset, secondAsset], 2, [firstAsset]],
     ["corrupt required entry", [firstAsset], 1, [firstAsset]],
   ] as const)(
-    "treats a %s completion as missing and repairs it",
+    "treats a %s completion as fatal corruption without silent repair",
     async (condition, configuredAssets, assetCount, cachedAssets) => {
       const { cacheStorage, dependencies, fetch } = harness({
         assets: [...configuredAssets],
@@ -468,15 +501,10 @@ describe("vision release cache transaction", () => {
       }
 
       await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
-        "missing",
+        "integrity-failed",
       );
-      await expect(cacheVisionRelease(command(), dependencies)).resolves.toBe(
-        "ready",
-      );
-      expect(fetch).toHaveBeenCalled();
-      await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
-        "ready",
-      );
+      expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
+      expect(fetch).not.toHaveBeenCalled();
     },
   );
 
@@ -484,22 +512,31 @@ describe("vision release cache transaction", () => {
     const { cacheStorage, dependencies } = harness({
       assets: [firstAsset, secondAsset],
     });
-    const cache = await seedCompletion(cacheStorage, releaseId, 2, [
-      firstAsset,
-    ]);
+    await seedCompletion(cacheStorage, releaseId, 2, [firstAsset]);
 
     await expect(
       matchCompletedVisionAsset(firstAsset.path, releaseId, dependencies),
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ code: "runtime-integrity-failed" });
+    expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
 
+    const complete = harness({ assets: [firstAsset, secondAsset] });
+    const completeCache = await seedCompletion(
+      complete.cacheStorage,
+      releaseId,
+      2,
+      [firstAsset, secondAsset],
+    );
     const secondBytes = bytesByPath.get(secondAsset.path)!;
     const secondBody = new Uint8Array(secondBytes.byteLength);
     secondBody.set(secondBytes);
-    cache.entries.set(secondAsset.path, new Response(secondBody.buffer));
+    completeCache.entries.set(
+      secondAsset.path,
+      new Response(secondBody.buffer),
+    );
     const response = await matchCompletedVisionAsset(
       firstAsset.path,
       releaseId,
-      dependencies,
+      complete.dependencies,
     );
     await expect(response?.text()).resolves.toBe("license");
   });
@@ -513,9 +550,9 @@ describe("vision release cache transaction", () => {
       downloadedManifest: manifest([alteredAsset]),
     });
 
-    await expect(cacheVisionRelease(command(), dependencies)).rejects.toThrow(
-      "Vision manifest inventory mismatch",
-    );
+    await expect(
+      cacheVisionRelease(command(), dependencies),
+    ).rejects.toMatchObject({ code: "runtime-integrity-failed" });
     expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
   });
 

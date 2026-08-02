@@ -120,6 +120,17 @@ describe("vision cache protocol guards", () => {
       true,
     ],
     [
+      "a fatal cache integrity error",
+      {
+        type: "CACHE_ERROR",
+        requestId: "cache-42",
+        generation: 2,
+        releaseId,
+        code: "runtime-integrity-failed",
+      },
+      true,
+    ],
+    [
       "an unsafe cache error reason",
       {
         type: "CACHE_ERROR",

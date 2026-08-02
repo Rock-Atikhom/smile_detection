@@ -1,14 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { VisionAssetError } from "../vision/integrity";
 import { VISION_MANIFEST } from "../vision/release";
 import type { VisionCacheEvent } from "../vision/protocol";
 
 const mocks = vi.hoisted(() => ({
   cacheVisionRelease: vi.fn(),
   cancelVisionRelease: vi.fn(),
+  clientsClaim: vi.fn(),
   cleanupOutdatedCaches: vi.fn(),
   matchCompletedVisionAsset: vi.fn(),
   precacheAndRoute: vi.fn(),
   queryVisionRelease: vi.fn(),
+}));
+
+vi.mock("workbox-core", () => ({
+  clientsClaim: mocks.clientsClaim,
 }));
 
 vi.mock("workbox-precaching", () => ({
@@ -87,6 +93,7 @@ describe("vision service worker", () => {
       workerScope.__WB_MANIFEST,
     );
     expect(mocks.cacheVisionRelease).not.toHaveBeenCalled();
+    expect(mocks.clientsClaim).toHaveBeenCalledOnce();
   });
 
   it("replies CACHE_CACHING then CACHE_READY for explicit caching", async () => {
@@ -104,6 +111,24 @@ describe("vision service worker", () => {
     expect(mocks.cacheVisionRelease).toHaveBeenCalledOnce();
   });
 
+  it("maps a release asset integrity exception to fatal cache recovery", async () => {
+    mocks.cacheVisionRelease.mockRejectedValue(
+      new VisionAssetError("runtime-integrity-failed", "notice"),
+    );
+    const { listeners } = await loadWorker();
+
+    const replies = await dispatchMessage(listeners.get("message")!, {
+      type: "CACHE_RELEASE",
+      ...base,
+      manifestUrl: "/vision/release-manifest.json",
+    });
+
+    expect(replies).toEqual([
+      { type: "CACHE_CACHING", ...base },
+      { type: "CACHE_ERROR", ...base, code: "runtime-integrity-failed" },
+    ]);
+  });
+
   it.each([
     ["ready", "CACHE_READY"],
     ["missing", "CACHE_MISSING"],
@@ -117,6 +142,20 @@ describe("vision service worker", () => {
     });
 
     expect(replies).toEqual([{ type, ...base }]);
+  });
+
+  it("maps completed-cache corruption to a fatal bounded reply", async () => {
+    mocks.queryVisionRelease.mockResolvedValue("integrity-failed");
+    const { listeners } = await loadWorker();
+
+    const replies = await dispatchMessage(listeners.get("message")!, {
+      type: "QUERY_RELEASE",
+      ...base,
+    });
+
+    expect(replies).toEqual([
+      { type: "CACHE_ERROR", ...base, code: "runtime-integrity-failed" },
+    ]);
   });
 
   it("cancels the requested generation and returns a bounded reply", async () => {
@@ -220,9 +259,8 @@ describe("vision service worker", () => {
     expect(responsePromise).toBeUndefined();
   });
 
-  it("uses a same-origin no-store network fallback for a missing asset", async () => {
-    const networkResponse = new Response("network");
-    const network = vi.fn(async () => networkResponse);
+  it("never falls back to unverified network bytes for an immutable asset", async () => {
+    const network = vi.fn(async () => new Response("unverified network"));
     vi.stubGlobal("fetch", network);
     const { listeners } = await loadWorker();
     const path = VISION_MANIFEST.assets[0]!.path;
@@ -236,10 +274,32 @@ describe("vision service worker", () => {
       },
     } as never);
 
-    await expect(responsePromise).resolves.toBe(networkResponse);
-    expect(network).toHaveBeenCalledWith(request, {
-      cache: "no-store",
-      credentials: "same-origin",
-    });
+    await expect(responsePromise).resolves.toMatchObject({ status: 503 });
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it("returns bounded empty bytes when an immutable cache entry fails integrity", async () => {
+    mocks.matchCompletedVisionAsset.mockRejectedValue(
+      Object.assign(new Error("private cache bytes"), {
+        code: "runtime-integrity-failed",
+      }),
+    );
+    const network = vi.fn(async () => new Response("unverified network"));
+    vi.stubGlobal("fetch", network);
+    const { listeners } = await loadWorker();
+    const path = VISION_MANIFEST.assets[0]!.path;
+    let responsePromise!: Promise<Response>;
+
+    listeners.get("fetch")!({
+      request: new Request(new URL(path, "https://app.test")),
+      respondWith: (promise: Promise<Response>) => {
+        responsePromise = promise;
+      },
+    } as never);
+
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    expect((await response.arrayBuffer()).byteLength).toBe(0);
+    expect(network).not.toHaveBeenCalled();
   });
 });

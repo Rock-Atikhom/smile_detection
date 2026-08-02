@@ -46,7 +46,7 @@ including generated release-manifest metadata, but no vendored vision release
 files. After **Continue to camera**, the service worker opens a separate
 versioned cache and fetches every manifest allowlisted asset from the same
 origin. It validates HTTP success, byte count, and SHA-256, stores verified
-responses, reads every required response back, and writes its completion marker
+responses, reads every manifest response back, and writes its completion marker
 last. Only a matching cache with that marker and successful readback is usable;
 cancellation, a failed download, or an integrity failure deletes the incomplete
 new cache while preserving a previously complete release.
@@ -57,3 +57,17 @@ complete matching release initializes from cache after a close/reopen. An
 integrity mismatch blocks initialization, removes affected unverified or
 incomplete cache content, stops the camera, and presents safe recovery rather
 than raw runtime details.
+
+The service worker claims the current page before runtime preparation, and the
+cache client sends commands only to that controlling worker. The coordinator
+constructs the classic vision worker only after the complete release cache has
+been verified and committed. Immutable vision fetches then have no network
+fallback: MediaPipe 0.10.35's loader-script and WASM URL requests are served as
+freshly verified copies from that completed cache.
+
+A missing completion marker remains the recoverable first-use state. Once a
+marker exists, an invalid marker or a missing/corrupt entry anywhere in the
+manifest deletes the whole release cache and enters fatal integrity recovery.
+If Cache Storage cannot commit a first release, setup fails closed before worker
+creation or camera permission and offers a bounded retry instead of running from
+unverifiable URL refetches.

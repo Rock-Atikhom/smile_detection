@@ -9,14 +9,19 @@ export interface VisionCacheRequest {
   manifestUrl: string;
   releaseId: string;
 }
+export type VisionCacheQueryResult = "ready" | "missing" | "integrity-failed";
+export type VisionCachePreparationResult =
+  "ready" | "error" | "integrity-failed";
+export type VisionCachePreparationState =
+  "caching" | VisionCachePreparationResult;
 export interface VisionCacheClient {
   queryRelease(
     request: Pick<VisionCacheRequest, "generation" | "releaseId">,
-  ): Promise<"ready" | "missing">;
+  ): Promise<VisionCacheQueryResult>;
   cacheRelease(
     request: VisionCacheRequest,
-    onState: (state: "caching" | "ready" | "error") => void,
-  ): Promise<"ready" | "error">;
+    onState: (state: VisionCachePreparationState) => void,
+  ): Promise<VisionCachePreparationResult>;
   cancel(request: Pick<VisionCacheRequest, "generation" | "releaseId">): void;
 }
 
@@ -29,10 +34,13 @@ interface ServiceWorkerRegistrationLike {
 }
 
 export interface ServiceWorkerContainerLike {
+  readonly controller: ServiceWorkerLike | null;
   addEventListener(
     type: "message",
     listener: (event: MessageEvent<unknown>) => void,
   ): void;
+  addEventListener(type: "controllerchange", listener: () => void): void;
+  removeEventListener(type: "controllerchange", listener: () => void): void;
   ready: PromiseLike<ServiceWorkerRegistrationLike>;
   register(scriptURL: string): Promise<unknown>;
 }
@@ -109,7 +117,7 @@ function createVisionCacheClient(
   return {
     cacheRelease(request, onState) {
       const requestId = nextRequestId();
-      return new Promise<"ready" | "error">((resolve) => {
+      return new Promise<VisionCachePreparationResult>((resolve) => {
         const fail = () => {
           onState("error");
           resolve("error");
@@ -132,6 +140,13 @@ function createVisionCacheClient(
                 resolve("ready");
                 return true;
               case "CACHE_ERROR":
+                if (event.code === "runtime-integrity-failed") {
+                  onState("integrity-failed");
+                  resolve("integrity-failed");
+                  return true;
+                }
+                fail();
+                return true;
               case "CACHE_CANCELLED":
               case "CACHE_MISSING":
                 fail();
@@ -151,7 +166,7 @@ function createVisionCacheClient(
     },
     queryRelease(request) {
       const requestId = nextRequestId();
-      return new Promise<"ready" | "missing">((resolve) => {
+      return new Promise<VisionCacheQueryResult>((resolve) => {
         const timeout = setTimeout(() => {
           pending.delete(requestId);
           resolve("missing");
@@ -167,10 +182,17 @@ function createVisionCacheClient(
             }
             if (
               event.type === "CACHE_MISSING" ||
-              event.type === "CACHE_ERROR" ||
               event.type === "CACHE_CANCELLED"
             ) {
               resolve("missing");
+              return true;
+            }
+            if (event.type === "CACHE_ERROR") {
+              resolve(
+                event.code === "runtime-integrity-failed"
+                  ? "integrity-failed"
+                  : "missing",
+              );
               return true;
             }
             return false;
@@ -188,6 +210,26 @@ function createVisionCacheClient(
 
 let productionClientPromise: Promise<VisionCacheClient> | undefined;
 
+async function waitForController(
+  serviceWorker: ServiceWorkerContainerLike,
+): Promise<ServiceWorkerLike | undefined> {
+  if (serviceWorker.controller !== null) return serviceWorker.controller;
+
+  return new Promise((resolve) => {
+    const finish = (worker: ServiceWorkerLike | undefined) => {
+      clearTimeout(timeout);
+      serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      resolve(worker);
+    };
+    const onControllerChange = () => {
+      if (serviceWorker.controller !== null) finish(serviceWorker.controller);
+    };
+    const timeout = setTimeout(() => finish(undefined), REQUEST_TIMEOUT_MS);
+    serviceWorker.addEventListener("controllerchange", onControllerChange);
+    onControllerChange();
+  });
+}
+
 async function createApplicationServiceWorkerClient(
   dependencies: RegisterServiceWorkerDependencies,
 ): Promise<VisionCacheClient> {
@@ -200,9 +242,10 @@ async function createApplicationServiceWorkerClient(
 
   try {
     await serviceWorker.register("/sw.js");
-    const registration = await serviceWorker.ready;
-    if (registration.active === null) return degradedClient();
-    return createVisionCacheClient(registration.active, serviceWorker);
+    await serviceWorker.ready;
+    const controller = await waitForController(serviceWorker);
+    if (controller === undefined) return degradedClient();
+    return createVisionCacheClient(controller, serviceWorker);
   } catch {
     return degradedClient();
   }

@@ -1,10 +1,12 @@
 /// <reference lib="webworker" />
 
+import { clientsClaim } from "workbox-core";
 import {
   cleanupOutdatedCaches,
   precacheAndRoute,
   type PrecacheEntry,
 } from "workbox-precaching";
+import { VisionAssetError } from "../vision/integrity";
 import { VISION_MANIFEST } from "../vision/release";
 import {
   isVisionCacheCommand,
@@ -16,6 +18,7 @@ import {
   cancelVisionRelease,
   matchCompletedVisionAsset,
   queryVisionRelease,
+  VisionCacheIntegrityError,
   type VisionCacheDependencies,
 } from "./vision-cache";
 
@@ -28,6 +31,17 @@ const immutableVisionPaths = new Set(
 );
 const activeCacheRequests = new Map<string, Map<string, number>>();
 const cancelledCacheRequestIds = new Set<string>();
+
+function isIntegrityFailure(error: unknown): boolean {
+  return (
+    error instanceof VisionCacheIntegrityError ||
+    (error instanceof VisionAssetError &&
+      error.code === "runtime-integrity-failed") ||
+    (error instanceof Error &&
+      "code" in error &&
+      error.code === "runtime-integrity-failed")
+  );
+}
 
 function cacheRequestKey(command: {
   generation: number;
@@ -62,6 +76,10 @@ function removeActiveCacheRequest(key: string, requestId: string): void {
 function eventFor(
   type: VisionCacheEvent["type"],
   command: VisionCacheCommand,
+  errorCode: Extract<
+    VisionCacheEvent,
+    { type: "CACHE_ERROR" }
+  >["code"] = "offline-cache-failed",
 ): VisionCacheEvent {
   const base = {
     requestId: command.requestId,
@@ -69,7 +87,7 @@ function eventFor(
     releaseId: command.releaseId,
   };
   if (type === "CACHE_ERROR") {
-    return { type, ...base, code: "offline-cache-failed" };
+    return { type, ...base, code: errorCode };
   }
   return { type, ...base };
 }
@@ -91,11 +109,19 @@ async function handleCacheCommand(
         ) {
           postMessage(eventFor("CACHE_READY", command));
         }
-      } catch {
+      } catch (error) {
         if (
           !cancelledCacheRequestIds.has(cancellationKey(key, command.requestId))
         ) {
-          postMessage(eventFor("CACHE_ERROR", command));
+          postMessage(
+            eventFor(
+              "CACHE_ERROR",
+              command,
+              isIntegrityFailure(error)
+                ? "runtime-integrity-failed"
+                : "offline-cache-failed",
+            ),
+          );
         }
       } finally {
         removeActiveCacheRequest(key, command.requestId);
@@ -116,8 +142,15 @@ async function handleCacheCommand(
         const state = await queryVisionRelease(command.releaseId, dependencies);
         postMessage(
           eventFor(
-            state === "ready" ? "CACHE_READY" : "CACHE_MISSING",
+            state === "ready"
+              ? "CACHE_READY"
+              : state === "missing"
+                ? "CACHE_MISSING"
+                : "CACHE_ERROR",
             command,
+            state === "integrity-failed"
+              ? "runtime-integrity-failed"
+              : "offline-cache-failed",
           ),
         );
       } catch {
@@ -135,6 +168,7 @@ const dependencies: VisionCacheDependencies = {
 };
 
 cleanupOutdatedCaches();
+clientsClaim();
 precacheAndRoute(self.__WB_MANIFEST);
 
 self.addEventListener("message", (event) => {
@@ -161,16 +195,19 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     (async () => {
-      const cached = await matchCompletedVisionAsset(
-        event.request,
-        VISION_MANIFEST.releaseId,
-        dependencies,
-      );
-      if (cached !== undefined) return cached;
-      return fetch(event.request, {
-        cache: "no-store",
-        credentials: "same-origin",
-      });
+      try {
+        const cached = await matchCompletedVisionAsset(
+          event.request,
+          VISION_MANIFEST.releaseId,
+          dependencies,
+        );
+        if (cached !== undefined) return cached;
+        return new Response(null, { status: 503 });
+      } catch (error) {
+        return isIntegrityFailure(error)
+          ? new Response(new Uint8Array(), { status: 200 })
+          : new Response(null, { status: 503 });
+      }
     })(),
   );
 });

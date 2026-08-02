@@ -361,6 +361,12 @@ const integrityRecoveryCopy: Copy = {
   text: "The required files could not be verified. Reload Smart Smile before using the camera.",
 };
 
+const cachePreparationFailureCopy: Copy = {
+  action: "Try setup again",
+  heading: "Smile detection setup needs attention",
+  text: "Smart Smile could not store the verified files needed to start safely. Free device storage or try again.",
+};
+
 function combinedCopy(
   cameraSnapshot: CameraSnapshot,
   runtimeSnapshot: VisionSnapshot,
@@ -372,6 +378,12 @@ function combinedCopy(
   }
   if (firstUseOffline || runtimeSnapshot.reason === "first-use-offline") {
     return firstUseOfflineCopy;
+  }
+  if (
+    runtimeSnapshot.runtime === "error" &&
+    runtimeSnapshot.reason === "offline-cache-failed"
+  ) {
+    return cachePreparationFailureCopy;
   }
   if (
     cameraSnapshot.state === "permission-pending" ||
@@ -428,6 +440,9 @@ export default function App() {
   const fatalIntegrity = vision.snapshot.reason === "runtime-integrity-failed";
   const offlineRecovery =
     firstUseOffline || vision.snapshot.reason === "first-use-offline";
+  const cachePreparationFailure =
+    vision.snapshot.runtime === "error" &&
+    vision.snapshot.reason === "offline-cache-failed";
   const active =
     cameraStartRequest !== null ||
     snapshot.state === "permission-pending" ||
@@ -437,7 +452,10 @@ export default function App() {
     snapshot.state === "ready" ||
     snapshot.reason === "switch-failed";
   const recovery =
-    fatalIntegrity || offlineRecovery || snapshot.state === "recoverable-error";
+    fatalIntegrity ||
+    offlineRecovery ||
+    cachePreparationFailure ||
+    snapshot.state === "recoverable-error";
   const sessionOverlayVisible =
     snapshot.state === "camera-starting" ||
     snapshot.state === "camera-switching" ||
@@ -458,11 +476,14 @@ export default function App() {
   const priorityStatus =
     fatalIntegrity ||
     offlineRecovery ||
-    snapshot.state === "permission-pending" ||
+    cachePreparationFailure ||
     snapshot.state === "recoverable-error" ||
     snapshot.reason === "switch-failed";
   const liveStatus =
-    fatalIntegrity || offlineRecovery || snapshot.state === "recoverable-error"
+    fatalIntegrity ||
+    offlineRecovery ||
+    cachePreparationFailure ||
+    snapshot.state === "recoverable-error"
       ? `Camera status: ${copy.heading}.`
       : snapshot.state === "permission-pending"
         ? "Camera permission requested."
@@ -549,6 +570,7 @@ export default function App() {
       setFirstUseOffline(true);
       return;
     }
+    if (result === "failed") return;
     consumedCameraStartRef.current = null;
     setCameraStartRequest(
       snapshot.state === "privacy-introduction" ? "start" : "restart",
