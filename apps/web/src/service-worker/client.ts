@@ -57,6 +57,7 @@ export interface RegisterServiceWorkerDependencies {
 interface PendingRequest {
   generation: number;
   releaseId: string;
+  cancel?(): void;
   fail(): void;
   receive(event: VisionCacheEvent): boolean;
   timeout: ReturnType<typeof setTimeout>;
@@ -98,11 +99,27 @@ function createVisionCacheClient(
     clearTimeout(request.timeout);
     pending.delete(requestId);
   };
+  const cancelOwnedRequest = (
+    request: Pick<PendingRequest, "generation" | "releaseId">,
+  ) => {
+    try {
+      serviceWorker.postMessage({
+        type: "CANCEL_CACHE",
+        requestId: nextRequestId(),
+        generation: request.generation,
+        releaseId: request.releaseId,
+      });
+    } catch {
+      // The selected worker is already unreachable; local invalidation remains
+      // bounded and no raw postMessage failure crosses the client boundary.
+    }
+  };
   const invalidate = () => {
     if (invalidated) return;
     invalidated = true;
     container.removeEventListener("message", receiveMessage);
     container.removeEventListener("controllerchange", receiveControllerChange);
+    for (const request of pending.values()) request.cancel?.();
     for (const [requestId, request] of pending) {
       cleanupPending(requestId, request);
       request.fail();
@@ -163,10 +180,17 @@ function createVisionCacheClient(
           resolve("error");
         };
         const timeout = setTimeout(() => {
-          pending.delete(requestId);
-          fail();
+          const active = pending.get(requestId);
+          if (active !== undefined) {
+            active.cancel?.();
+            cleanupPending(requestId, active);
+            fail();
+          }
         }, REQUEST_TIMEOUT_MS);
-        pending.set(requestId, {
+        const pendingRequest: PendingRequest = {
+          cancel() {
+            cancelOwnedRequest(pendingRequest);
+          },
           generation: request.generation,
           releaseId: request.releaseId,
           fail,
@@ -194,7 +218,8 @@ function createVisionCacheClient(
                 return true;
             }
           },
-        });
+        };
+        pending.set(requestId, pendingRequest);
         if (!post({ type: "CACHE_RELEASE", requestId, ...request })) {
           const active = pending.get(requestId);
           if (active !== undefined) {

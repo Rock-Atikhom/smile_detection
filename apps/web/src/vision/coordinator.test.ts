@@ -525,6 +525,27 @@ describe("VisionCoordinator", () => {
     expect(harness.workers[0]!.terminate).toHaveBeenCalledOnce();
   });
 
+  it("surfaces a late worker cache operation failure as recoverable", async () => {
+    const harness = createHarness();
+    await harness.coordinator.prepare();
+
+    harness.workers[0]!.dispatch({
+      type: "ERROR",
+      generation: 0,
+      code: "offline-cache-failed",
+      recoverable: true,
+    });
+
+    expect(harness.snapshot()).toMatchObject({
+      runtime: "error",
+      offlineCache: "error",
+      reason: "offline-cache-failed",
+      retryAvailable: true,
+    });
+    expect(harness.cache.client.cancel).not.toHaveBeenCalled();
+    expect(harness.workers[0]!.terminate).toHaveBeenCalledOnce();
+  });
+
   it("accepts one baseline result and ignores later terminal replies", async () => {
     const harness = createHarness();
     await harness.coordinator.prepare();

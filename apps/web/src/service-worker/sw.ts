@@ -7,6 +7,7 @@ import {
   type PrecacheEntry,
 } from "workbox-precaching";
 import { VisionAssetError } from "../vision/integrity";
+import { VISION_RELEASE_PATH_PREFIX } from "../vision/manifest";
 import { VISION_MANIFEST } from "../vision/release";
 import {
   isVisionCacheCommand,
@@ -45,11 +46,14 @@ function isIntegrityFailure(error: unknown): boolean {
   );
 }
 
-function cacheRequestKey(command: {
-  generation: number;
-  releaseId: string;
-}): string {
-  return `${command.generation}:${command.releaseId}`;
+function cacheRequestKey(
+  ownerId: string,
+  command: {
+    generation: number;
+    releaseId: string;
+  },
+): string {
+  return JSON.stringify([ownerId, command.generation, command.releaseId]);
 }
 
 function addActiveCacheRequest(key: string, requestId: string): void {
@@ -59,7 +63,7 @@ function addActiveCacheRequest(key: string, requestId: string): void {
 }
 
 function cancellationKey(key: string, requestId: string): string {
-  return `${key}:${requestId}`;
+  return JSON.stringify([key, requestId]);
 }
 
 function removeActiveCacheRequest(key: string, requestId: string): void {
@@ -96,16 +100,17 @@ function eventFor(
 
 async function handleCacheCommand(
   command: VisionCacheCommand,
+  ownerId: string,
   postMessage: (event: VisionCacheEvent) => void,
   dependencies: VisionCacheDependencies,
 ): Promise<void> {
   switch (command.type) {
     case "CACHE_RELEASE": {
-      const key = cacheRequestKey(command);
+      const key = cacheRequestKey(ownerId, command);
       addActiveCacheRequest(key, command.requestId);
       postMessage(eventFor("CACHE_CACHING", command));
       try {
-        await cacheVisionRelease(command, dependencies);
+        await cacheVisionRelease(command, ownerId, dependencies);
         if (
           !cancelledCacheRequestIds.has(cancellationKey(key, command.requestId))
         ) {
@@ -131,11 +136,11 @@ async function handleCacheCommand(
       return;
     }
     case "CANCEL_CACHE": {
-      const key = cacheRequestKey(command);
+      const key = cacheRequestKey(ownerId, command);
       for (const requestId of activeCacheRequests.get(key)?.keys() ?? []) {
         cancelledCacheRequestIds.add(cancellationKey(key, requestId));
       }
-      cancelVisionRelease(command.generation);
+      cancelVisionRelease(ownerId, command.generation, command.releaseId);
       postMessage(eventFor("CACHE_CANCELLED", command));
       return;
     }
@@ -169,6 +174,16 @@ const dependencies: VisionCacheDependencies = {
   scope: self.registration.scope,
 };
 
+function sourceClientId(
+  source: ExtendableMessageEvent["source"],
+): string | undefined {
+  if (source === null || typeof source !== "object" || !("id" in source)) {
+    return undefined;
+  }
+  const id = source.id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
 cleanupOutdatedCaches();
 void self.skipWaiting();
 clientsClaim();
@@ -189,9 +204,12 @@ self.addEventListener("message", (event) => {
     return;
   }
   if (!isVisionCacheCommand(event.data)) return;
+  const ownerId = sourceClientId(event.source);
+  if (ownerId === undefined) return;
   event.waitUntil(
     handleCacheCommand(
       event.data,
+      ownerId,
       (reply) => event.source?.postMessage(reply),
       dependencies,
     ),
@@ -201,11 +219,18 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (
-    event.request.method !== "GET" ||
     url.origin !== self.location.origin ||
+    !url.pathname.startsWith(VISION_RELEASE_PATH_PREFIX)
+  ) {
+    return;
+  }
+
+  if (
+    event.request.method !== "GET" ||
     url.search !== "" ||
     !immutableVisionPaths.has(url.pathname)
   ) {
+    event.respondWith(Promise.resolve(new Response(null, { status: 503 })));
     return;
   }
 

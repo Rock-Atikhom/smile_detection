@@ -433,6 +433,11 @@ describe("VisionCacheClient", () => {
       { generation: 3, manifestUrl, releaseId },
       (state) => states.push(state),
     );
+    const secondStates: VisionCachePreparationState[] = [];
+    const secondPendingCache = client.cacheRelease(
+      { generation: 4, manifestUrl, releaseId },
+      (state) => secondStates.push(state),
+    );
     const query = serviceWorker.posted.find(
       (command) => command.type === "QUERY_RELEASE",
     )!;
@@ -444,6 +449,22 @@ describe("VisionCacheClient", () => {
     } as unknown as typeof serviceWorker.worker;
 
     serviceWorker.changeController(replacement);
+    const cancellationCommands = serviceWorker.posted.filter(
+      (command) => command.type === "CANCEL_CACHE",
+    );
+    expect(cancellationCommands).toEqual([
+      expect.objectContaining({
+        type: "CANCEL_CACHE",
+        generation: 3,
+        releaseId,
+      }),
+      expect.objectContaining({
+        type: "CANCEL_CACHE",
+        generation: 4,
+        releaseId,
+      }),
+    ]);
+    expect(replacement.postMessage).not.toHaveBeenCalled();
     serviceWorker.dispatch(
       {
         type: "CACHE_READY",
@@ -465,7 +486,9 @@ describe("VisionCacheClient", () => {
 
     await expect(pendingQuery).resolves.toBe("indeterminate");
     await expect(pendingCache).resolves.toBe("error");
+    await expect(secondPendingCache).resolves.toBe("error");
     expect(states).toEqual(["error"]);
+    expect(secondStates).toEqual(["error"]);
     expect(serviceWorker.listeners.size).toBe(0);
     expect(serviceWorker.controllerListeners.size).toBe(0);
   });
@@ -534,11 +557,27 @@ describe("VisionCacheClient", () => {
       { generation: 4, manifestUrl, releaseId },
       (state) => states.push(state),
     );
+    const release = serviceWorker.posted[0]!;
 
     await vi.advanceTimersByTimeAsync(15_000);
 
     await expect(pending).resolves.toBe("error");
     expect(states).toEqual(["error"]);
+    expect(serviceWorker.posted[1]).toMatchObject({
+      type: "CANCEL_CACHE",
+      generation: 4,
+      releaseId,
+    });
+
+    serviceWorker.dispatch({
+      type: "CACHE_READY",
+      requestId: release.requestId,
+      generation: 4,
+      releaseId,
+    });
+    await Promise.resolve();
+    expect(states).toEqual(["error"]);
+    expect(serviceWorker.posted).toHaveLength(2);
   });
 
   it("reports a cache-query timeout as indeterminate instead of missing", async () => {

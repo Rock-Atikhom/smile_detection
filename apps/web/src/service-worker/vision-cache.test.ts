@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  VisionAssetError,
+  VisionAssetOperationalError,
+} from "../vision/integrity";
 import type { VisionAsset, VisionReleaseManifest } from "../vision/manifest";
 import {
   cacheVisionRelease,
@@ -16,6 +20,7 @@ const releaseId = "0123456789abcdef";
 const olderReleaseId = "fedcba9876543210";
 const manifestUrl = "/vision/release-manifest.json";
 const scope = "https://app.test/";
+const ownerId = "client-a";
 const bytesByPath = new Map<string, Uint8Array>();
 
 function asset(
@@ -189,12 +194,22 @@ function harness(options?: {
         !response.ok ||
         expectedAsset.path === options?.verificationFailureFor
       ) {
-        throw new Error("verification failed");
+        throw new VisionAssetError(
+          "runtime-integrity-failed",
+          expectedAsset.id,
+        );
       }
       const actual = new Uint8Array(await response.arrayBuffer());
-      expect(Array.from(actual)).toEqual(
-        Array.from(bytesByPath.get(expectedAsset.path)!),
-      );
+      const expected = bytesByPath.get(expectedAsset.path)!;
+      if (
+        actual.byteLength !== expected.byteLength ||
+        actual.some((byte, index) => byte !== expected[index])
+      ) {
+        throw new VisionAssetError(
+          "runtime-integrity-failed",
+          expectedAsset.id,
+        );
+      }
       return actual;
     },
   );
@@ -250,9 +265,9 @@ describe("vision release cache transaction", () => {
   it("writes verified bytes, reads them back, and commits completion last", async () => {
     const { dependencies, operations } = harness();
 
-    await expect(cacheVisionRelease(command(), dependencies)).resolves.toBe(
-      "ready",
-    );
+    await expect(
+      cacheVisionRelease(command(), ownerId, dependencies),
+    ).resolves.toBe("ready");
 
     expect(operations).toEqual([
       "open:smart-smile-vision-" + releaseId,
@@ -269,7 +284,7 @@ describe("vision release cache transaction", () => {
       assets: [firstAsset, secondAsset],
     });
 
-    await cacheVisionRelease(command(), dependencies);
+    await cacheVisionRelease(command(), ownerId, dependencies);
 
     expect(operations.at(-1)).toBe(`put-completion:${releaseId}`);
     expect(
@@ -288,7 +303,7 @@ describe("vision release cache transaction", () => {
       await seedCompletion(cacheStorage, olderReleaseId);
 
       await expect(
-        cacheVisionRelease(command(), dependencies),
+        cacheVisionRelease(command(), ownerId, dependencies),
       ).rejects.toThrow();
 
       expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
@@ -298,7 +313,7 @@ describe("vision release cache transaction", () => {
     },
   );
 
-  it("cancels only the matching generation and removes its incomplete cache", async () => {
+  it("cancels only the matching owner, generation, and release transaction", async () => {
     const matching = harness();
     const other = harness();
     let releaseFetchStarted!: () => void;
@@ -316,13 +331,23 @@ describe("vision release cache transaction", () => {
       });
     });
 
-    const pending = cacheVisionRelease(command(7), matching.dependencies);
+    const pending = cacheVisionRelease(
+      command(7),
+      ownerId,
+      matching.dependencies,
+    );
     await started;
-    cancelVisionRelease(6);
+    const otherPending = cacheVisionRelease(
+      command(7),
+      "client-b",
+      other.dependencies,
+    );
+    cancelVisionRelease(ownerId, 6, releaseId);
     expect(matching.cacheStorage.deleted).toEqual([]);
-    cancelVisionRelease(7);
+    cancelVisionRelease(ownerId, 7, releaseId);
 
     await expect(pending).rejects.toThrow();
+    await expect(otherPending).resolves.toBe("ready");
     expect(matching.cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
     expect(other.cacheStorage.deleted).toEqual([]);
   });
@@ -344,10 +369,10 @@ describe("vision release cache transaction", () => {
       return originalVerify(response, expectedAsset);
     });
 
-    const pending = cacheVisionRelease(command(8), dependencies);
+    const pending = cacheVisionRelease(command(8), ownerId, dependencies);
     await readbackStarted.promise;
     const incomplete = cacheStorage.caches.get(visionCacheName(releaseId))!;
-    cancelVisionRelease(8);
+    cancelVisionRelease(ownerId, 8, releaseId);
     releaseReadback.resolve();
 
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
@@ -373,14 +398,14 @@ describe("vision release cache transaction", () => {
       return originalFetch(input, init);
     });
 
-    const failing = cacheVisionRelease(command(10), dependencies);
+    const failing = cacheVisionRelease(command(10), ownerId, dependencies);
     await firstStarted.promise;
-    const succeeding = cacheVisionRelease(command(11), dependencies);
+    const succeeding = cacheVisionRelease(command(11), ownerId, dependencies);
     await Promise.resolve();
     await Promise.resolve();
 
     expect(assetFetches).toBe(1);
-    cancelVisionRelease(10);
+    cancelVisionRelease(ownerId, 10, releaseId);
     firstAssetFetch.reject(new DOMException("cancelled", "AbortError"));
 
     await expect(failing).rejects.toThrow();
@@ -402,10 +427,10 @@ describe("vision release cache transaction", () => {
       return firstAssetFetch.promise;
     });
 
-    const completing = cacheVisionRelease(command(20), dependencies);
+    const completing = cacheVisionRelease(command(20), ownerId, dependencies);
     await firstStarted.promise;
-    const cancelled = cacheVisionRelease(command(21), dependencies);
-    cancelVisionRelease(21);
+    const cancelled = cacheVisionRelease(command(21), ownerId, dependencies);
+    cancelVisionRelease(ownerId, 21, releaseId);
     const bytes = bytesByPath.get(firstAsset.path)!;
     const body = new Uint8Array(bytes.byteLength);
     body.set(bytes);
@@ -431,9 +456,9 @@ describe("vision release cache transaction", () => {
     await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
       "ready",
     );
-    await expect(cacheVisionRelease(command(), dependencies)).resolves.toBe(
-      "ready",
-    );
+    await expect(
+      cacheVisionRelease(command(), ownerId, dependencies),
+    ).resolves.toBe("ready");
     expect(fetch).not.toHaveBeenCalled();
 
     cache.entries.set(
@@ -458,6 +483,65 @@ describe("vision release cache transaction", () => {
     );
 
     expect(cacheStorage.deleted).toEqual([]);
+  });
+
+  it("preserves a completed release when cache reads fail operationally", async () => {
+    const { cacheStorage, dependencies } = harness();
+    const cache = await seedCompletion(cacheStorage, releaseId, 1, [
+      firstAsset,
+    ]);
+    const originalMatch = cache.match.bind(cache);
+    cache.match = vi.fn(async (request) => {
+      if (requestKey(request) === completionUrl(scope, releaseId)) {
+        throw new Error("private cache backend failure");
+      }
+      return originalMatch(request);
+    });
+    const pending = queryVisionRelease(releaseId, dependencies);
+
+    await expect(pending).rejects.toMatchObject({
+      code: "offline-cache-failed",
+    });
+    await expect(pending).rejects.not.toThrow("private cache backend failure");
+    expect(cacheStorage.deleted).toEqual([]);
+    expect(cacheStorage.caches.has(visionCacheName(releaseId))).toBe(true);
+  });
+
+  it("preserves a completed release when verification fails operationally", async () => {
+    const { cacheStorage, dependencies } = harness();
+    await seedCompletion(cacheStorage, releaseId, 1, [firstAsset]);
+    dependencies.verifyResponse = vi.fn(async (_response, expectedAsset) => {
+      throw new VisionAssetOperationalError(expectedAsset.id);
+    });
+    const pending = queryVisionRelease(releaseId, dependencies);
+
+    await expect(pending).rejects.toMatchObject({
+      code: "offline-cache-failed",
+    });
+    expect(cacheStorage.deleted).toEqual([]);
+    expect(cacheStorage.caches.has(visionCacheName(releaseId))).toBe(true);
+  });
+
+  it("preserves trusted release data when a target response fails operationally", async () => {
+    const { cacheStorage, dependencies } = harness();
+    await seedCompletion(cacheStorage, releaseId, 1, [firstAsset]);
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "ready",
+    );
+    dependencies.verifyResponse = vi.fn(async (_response, expectedAsset) => {
+      throw new VisionAssetOperationalError(expectedAsset.id);
+    });
+    const pending = matchCompletedVisionAsset(
+      firstAsset.path,
+      releaseId,
+      dependencies,
+    );
+
+    await expect(pending).rejects.toMatchObject({
+      code: "offline-cache-failed",
+    });
+    expect(cacheStorage.deleted).toEqual([]);
+    expect(cacheStorage.caches.has(visionCacheName(releaseId))).toBe(true);
   });
 
   it("deletes and reports a completed release with a corrupt non-runtime asset", async () => {
@@ -616,7 +700,9 @@ describe("vision release cache transaction", () => {
     await firstVerificationStarted.promise;
     const delayedQuery = queryVisionRelease(releaseId, dependencies);
     await secondCompletionReadStarted.promise;
-    verificationFailure.reject(new Error("verification failed"));
+    verificationFailure.reject(
+      new VisionAssetError("runtime-integrity-failed", firstAsset.id),
+    );
     await Promise.allSettled([firstQuery, delayedQuery]);
 
     expect(verification).toHaveBeenCalledOnce();
@@ -635,9 +721,9 @@ describe("vision release cache transaction", () => {
     );
     expect(verification).toHaveBeenCalledTimes(2);
 
-    await expect(cacheVisionRelease(command(), dependencies)).resolves.toBe(
-      "ready",
-    );
+    await expect(
+      cacheVisionRelease(command(), ownerId, dependencies),
+    ).resolves.toBe("ready");
     expect(verification).toHaveBeenCalledTimes(4);
     await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
       "ready",
@@ -717,15 +803,38 @@ describe("vision release cache transaction", () => {
     });
 
     await expect(
-      cacheVisionRelease(command(), dependencies),
+      cacheVisionRelease(command(), ownerId, dependencies),
     ).rejects.toMatchObject({ code: "runtime-integrity-failed" });
+    expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
+  });
+
+  it("reports manifest response-read failures as operational", async () => {
+    const { cacheStorage, dependencies } = harness();
+    const originalFetch = dependencies.fetch;
+    dependencies.fetch = vi.fn(async (input, init) => {
+      const response = await originalFetch(input, init);
+      if (requestKey(input) === manifestUrl) {
+        vi.spyOn(response, "json").mockRejectedValue(
+          new Error("private manifest response failure"),
+        );
+      }
+      return response;
+    });
+    const pending = cacheVisionRelease(command(), ownerId, dependencies);
+
+    await expect(pending).rejects.toMatchObject({
+      code: "offline-cache-failed",
+    });
+    await expect(pending).rejects.not.toThrow(
+      "private manifest response failure",
+    );
     expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
   });
 
   it("stores no upstream participant/session headers or non-cache data", async () => {
     const { cacheStorage, dependencies } = harness();
 
-    await cacheVisionRelease(command(), dependencies);
+    await cacheVisionRelease(command(), ownerId, dependencies);
 
     const cache = cacheStorage.caches.get(visionCacheName(releaseId));
     const stored = await cache?.match(firstAsset.path);

@@ -427,7 +427,8 @@ export class VisionCoordinator {
       this.cancelActiveCache(active.generation);
     }
     this.publish({
-      ...(value.code === "runtime-integrity-failed"
+      ...(value.code === "runtime-integrity-failed" ||
+      value.code === "offline-cache-failed"
         ? { offlineCache: "error" as const }
         : {}),
       phase: null,

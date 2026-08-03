@@ -73,6 +73,7 @@ async function createManifest(): Promise<VisionReleaseManifest> {
 }
 
 async function createDependencies(options?: {
+  downloadedManifest?: VisionReleaseManifest;
   supportsSimd?: boolean;
   responseBytes?: Partial<Record<CriticalRole, Uint8Array>>;
 }): Promise<{
@@ -85,7 +86,7 @@ async function createDependencies(options?: {
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === manifestUrl) {
-      return Response.json(manifest);
+      return Response.json(options?.downloadedManifest ?? manifest);
     }
     const asset = byPath.get(url);
     if (asset === undefined) {
@@ -104,8 +105,9 @@ async function createDependencies(options?: {
     dependencies: {
       createLandmarker,
       fetch,
+      manifest,
       supportsSimd: () => options?.supportsSimd ?? true,
-    },
+    } as VisionRuntimeDependencies & { manifest: VisionReleaseManifest },
     fetch,
   };
 }
@@ -122,6 +124,33 @@ function prepare(
 }
 
 describe("prepareVisionRuntime", () => {
+  it("rejects an altered manifest with the configured release ID before any asset fetch or construction", async () => {
+    const configured = await createManifest();
+    const altered = {
+      ...configured,
+      assets: configured.assets
+        .map((asset) =>
+          asset.role === "wasm-loader-simd"
+            ? {
+                ...asset,
+                path: `${VISION_RELEASE_PATH_PREFIX}unknown-loader.js`,
+              }
+            : asset,
+        )
+        .sort((left, right) => left.path.localeCompare(right.path)),
+    };
+    const { createLandmarker, dependencies, fetch } = await createDependencies({
+      downloadedManifest: altered,
+    });
+
+    await expect(prepare(dependencies)).rejects.toMatchObject({
+      code: "runtime-integrity-failed",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(manifestUrl, expect.anything());
+    expect(createLandmarker).not.toHaveBeenCalled();
+  });
+
   it("constructs exactly one CPU video Face Landmarker from verified SIMD assets", async () => {
     const { createLandmarker, dependencies } = await createDependencies();
     const onPhase = vi.fn();
@@ -229,6 +258,56 @@ describe("prepareVisionRuntime", () => {
       expect.objectContaining({ code: "runtime-download-failed" }),
     );
     await expect(prepare(dependencies)).rejects.not.toThrow("private URL");
+  });
+
+  it("maps verified-response operational failures to recoverable offline cache failure", async () => {
+    const { dependencies } = await createDependencies();
+    const fetch = dependencies.fetch;
+    dependencies.fetch = vi.fn(async (input, init) => {
+      const response = await fetch(input, init);
+      if (String(input) === paths["face-landmarker-model"]) {
+        vi.spyOn(response, "arrayBuffer").mockRejectedValue(
+          new Error("private cache implementation failure"),
+        );
+      }
+      return response;
+    });
+    const pending = prepare(dependencies);
+
+    await expect(pending).rejects.toMatchObject({
+      code: "offline-cache-failed",
+    });
+    await expect(pending).rejects.not.toThrow(
+      "private cache implementation failure",
+    );
+  });
+
+  it("maps manifest response-read failures to recoverable offline cache failure", async () => {
+    const {
+      createLandmarker,
+      dependencies,
+      fetch: fetchSpy,
+    } = await createDependencies();
+    const originalFetch = dependencies.fetch;
+    dependencies.fetch = vi.fn(async (input, init) => {
+      const response = await originalFetch(input, init);
+      if (String(input) === manifestUrl) {
+        vi.spyOn(response, "json").mockRejectedValue(
+          new Error("private manifest response failure"),
+        );
+      }
+      return response;
+    });
+    const pending = prepare(dependencies);
+
+    await expect(pending).rejects.toMatchObject({
+      code: "offline-cache-failed",
+    });
+    await expect(pending).rejects.not.toThrow(
+      "private manifest response failure",
+    );
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(createLandmarker).not.toHaveBeenCalled();
   });
 
   it.each([

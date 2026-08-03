@@ -12,6 +12,7 @@ vi.mock("./runtime-loader", async (importOriginal) => {
 });
 
 import { prepareVisionRuntime, VisionRuntimeError } from "./runtime-loader";
+import { VISION_MANIFEST } from "./release";
 import { createVisionWorkerRuntime } from "./worker-runtime";
 
 const releaseId = "0123456789abcdef";
@@ -19,6 +20,7 @@ const manifestUrl = "/vision/release-manifest.json";
 const unusedDependencies: VisionRuntimeDependencies = {
   createLandmarker: vi.fn(),
   fetch: vi.fn(),
+  manifest: VISION_MANIFEST,
   supportsSimd: vi.fn(),
 };
 
@@ -205,6 +207,11 @@ describe("createVisionWorkerRuntime", () => {
       new VisionRuntimeError("runtime-integrity-failed"),
       "runtime-integrity-failed",
       false,
+    ],
+    [
+      new VisionRuntimeError("offline-cache-failed"),
+      "offline-cache-failed",
+      true,
     ],
     [
       new Error("private upstream details"),
