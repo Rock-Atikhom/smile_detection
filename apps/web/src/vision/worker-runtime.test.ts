@@ -50,6 +50,51 @@ function prepareCommand(generation: number) {
   return { type: "PREPARE", generation, manifestUrl, releaseId } as const;
 }
 
+function bitmap() {
+  return { close: vi.fn<() => void>() } as unknown as ImageBitmap;
+}
+
+function frame(
+  generation: number,
+  image: ImageBitmap,
+  overrides: Partial<{
+    sequence: number;
+    capturedAtMs: number;
+    width: number;
+    height: number;
+    orientation: "portrait" | "landscape";
+    tier: "standard";
+  }> = {},
+) {
+  return {
+    type: "FRAME" as const,
+    generation,
+    sequence: 1,
+    capturedAtMs: 100,
+    width: 640,
+    height: 480,
+    orientation: "portrait" as const,
+    tier: "standard" as const,
+    bitmap: image,
+    ...overrides,
+  };
+}
+
+const eligibleFace = [
+  { x: 0.35, y: 0.25 },
+  { x: 0.65, y: 0.25 },
+  { x: 0.35, y: 0.65 },
+  { x: 0.65, y: 0.65 },
+];
+
+function readyRuntime(instance = prepared()) {
+  vi.mocked(prepareVisionRuntime).mockResolvedValue(instance);
+  const postMessage = vi.fn<(event: VisionWorkerEvent) => void>();
+  const runtime = createVisionWorkerRuntime(unusedDependencies, postMessage);
+  runtime.receive(prepareCommand(4));
+  return { instance, postMessage, runtime };
+}
+
 describe("createVisionWorkerRuntime", () => {
   beforeEach(() => {
     vi.mocked(prepareVisionRuntime).mockReset();
@@ -259,9 +304,148 @@ describe("createVisionWorkerRuntime", () => {
     runtime.dispose();
     runtime.dispose();
     runtime.receive(prepareCommand(5));
+    const discardedImage = bitmap();
+    runtime.receive(frame(4, discardedImage));
 
     expect(input?.signal.aborted).toBe(true);
     expect(instance.close).toHaveBeenCalledOnce();
     expect(prepareVisionRuntime).toHaveBeenCalledOnce();
+    expect(discardedImage.close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps only the latest pending frame while inference is running", async () => {
+    const inference = deferred<unknown>();
+    const instance = prepared();
+    instance.detectForVideo.mockReturnValueOnce(inference.promise);
+    const { postMessage, runtime } = readyRuntime(instance);
+    const imageA = bitmap();
+    const imageB = bitmap();
+    const imageC = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, imageA, { sequence: 1 }));
+    runtime.receive(frame(4, imageB, { sequence: 2 }));
+    runtime.receive(frame(4, imageC, { sequence: 3 }));
+
+    expect(imageB.close).toHaveBeenCalledOnce();
+    inference.resolve({ faceLandmarks: [eligibleFace], faceBlendshapes: [] });
+
+    await vi.waitFor(() => expect(imageA.close).toHaveBeenCalledOnce());
+    expect(instance.detectForVideo).toHaveBeenLastCalledWith(
+      imageC,
+      expect.any(Number),
+    );
+    await vi.waitFor(() => expect(imageC.close).toHaveBeenCalledOnce());
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "FACE_EVIDENCE",
+      generation: 4,
+      sequence: 1,
+      capturedAtMs: 100,
+      completedAtMs: expect.any(Number),
+      width: 640,
+      height: 480,
+      orientation: "portrait",
+      tier: "standard",
+      faceCount: 1,
+      guidance: "face-ready",
+      eligible: true,
+    });
+  });
+
+  it("closes a valid frame received before its generation is ready", async () => {
+    const instance = prepared();
+    const pending = deferred<PreparedVisionRuntime>();
+    vi.mocked(prepareVisionRuntime).mockReturnValue(pending.promise);
+    const runtime = createVisionWorkerRuntime(unusedDependencies, vi.fn());
+    const image = bitmap();
+
+    runtime.receive(prepareCommand(4));
+    runtime.receive(frame(4, image));
+
+    expect(image.close).toHaveBeenCalledOnce();
+    pending.resolve(instance);
+  });
+
+  it("closes frames for an old generation without inference", async () => {
+    const { instance, runtime } = readyRuntime();
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(3, image));
+
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(instance.detectForVideo).not.toHaveBeenCalled();
+  });
+
+  it("closes pending and active frames when the generation is cancelled", async () => {
+    const inference = deferred<unknown>();
+    const instance = prepared();
+    instance.detectForVideo.mockReturnValueOnce(inference.promise);
+    const { postMessage, runtime } = readyRuntime(instance);
+    const activeImage = bitmap();
+    const pendingImage = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, activeImage));
+    runtime.receive(frame(4, pendingImage, { sequence: 2 }));
+    runtime.receive({ type: "CANCEL", generation: 4 });
+    inference.resolve({ faceLandmarks: [eligibleFace], faceBlendshapes: [] });
+
+    expect(pendingImage.close).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(activeImage.close).toHaveBeenCalledOnce());
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+  });
+
+  it("closes pending and active frames when disposed", async () => {
+    const inference = deferred<unknown>();
+    const instance = prepared();
+    instance.detectForVideo.mockReturnValueOnce(inference.promise);
+    const { postMessage, runtime } = readyRuntime(instance);
+    const activeImage = bitmap();
+    const pendingImage = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, activeImage));
+    runtime.receive(frame(4, pendingImage, { sequence: 2 }));
+    runtime.dispose();
+    inference.resolve({ faceLandmarks: [eligibleFace], faceBlendshapes: [] });
+
+    expect(pendingImage.close).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(activeImage.close).toHaveBeenCalledOnce());
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+  });
+
+  it("closes an active frame when inference throws", async () => {
+    const instance = prepared();
+    instance.detectForVideo.mockImplementationOnce(() => {
+      throw new Error("inference failed");
+    });
+    const { postMessage, runtime } = readyRuntime(instance);
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, image));
+
+    await vi.waitFor(() => expect(image.close).toHaveBeenCalledOnce());
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+  });
+
+  it("ignores malformed input without posting evidence", () => {
+    const { instance, postMessage, runtime } = readyRuntime();
+    const image = bitmap();
+
+    runtime.receive({ ...frame(4, image), unexpected: true });
+
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(instance.detectForVideo).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
   });
 });
