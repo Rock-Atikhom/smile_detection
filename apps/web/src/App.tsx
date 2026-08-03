@@ -1,5 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -9,9 +10,23 @@ import {
 import type { CameraRecoveryReason, CameraSnapshot } from "./camera/session";
 import { useCameraSession } from "./camera/useCameraSession";
 import type { VisionSnapshot } from "./vision/coordinator";
+import type { FaceGuidance } from "./vision/face-evidence";
+import {
+  createBrowserFaceFramePump,
+  type FaceFramePump,
+} from "./vision/face-frame-pump";
 import { useVisionRuntime } from "./vision/useVisionRuntime";
 
 type Copy = { action?: string; heading: string; text: string };
+
+const faceGuidanceCopy: Record<FaceGuidance, string> = {
+  "no-face": "Show your face",
+  "multiple-faces": "Only one person",
+  "too-close": "Move back",
+  "too-far": "Move closer",
+  "off-center": "Center your face",
+  "face-ready": "Face ready",
+};
 
 const errorCopy: Record<CameraRecoveryReason, Copy> = {
   "aborted-request": {
@@ -409,6 +424,17 @@ function combinedCopy(
       text: "Stop and restart the camera to try preparing smile detection again.",
     };
   }
+  if (
+    cameraSnapshot.state === "ready" &&
+    runtimeSnapshot.runtime === "ready" &&
+    runtimeSnapshot.face.state === "ready" &&
+    runtimeSnapshot.face.guidance !== null
+  ) {
+    return {
+      heading: faceGuidanceCopy[runtimeSnapshot.face.guidance],
+      text: "",
+    };
+  }
   return coachCopy(cameraSnapshot);
 }
 
@@ -423,6 +449,8 @@ export default function App() {
   const [cameraStartRequest, setCameraStartRequest] = useState<
     "start" | "restart" | null
   >(null);
+  const faceFramePumpRef = useRef<FaceFramePump | null>(null);
+  const faceFrameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const actionGenerationRef = useRef(0);
   const consumedCameraStartRef = useRef<"start" | "restart" | null>(null);
   const fatalIntegrityRef = useRef(false);
@@ -431,6 +459,16 @@ export default function App() {
   const previousPriorityStatusRef = useRef(false);
   const primaryActionRef = useRef<HTMLButtonElement>(null);
   const recoveryHeadingRef = useRef<HTMLHeadingElement>(null);
+  const stopFaceFramePump = useCallback(() => {
+    if (faceFrameTimerRef.current !== null) {
+      clearTimeout(faceFrameTimerRef.current);
+      faceFrameTimerRef.current = null;
+    }
+    const pump = faceFramePumpRef.current;
+    faceFramePumpRef.current = null;
+    pump?.stop();
+    pump?.dispose();
+  }, []);
   const copy = combinedCopy(
     snapshot,
     vision.snapshot,
@@ -488,6 +526,72 @@ export default function App() {
       : snapshot.state === "permission-pending"
         ? "Camera permission requested."
         : offlineAnnouncement;
+  const faceGuidance =
+    snapshot.state === "ready" &&
+    vision.snapshot.runtime === "ready" &&
+    vision.snapshot.face.state === "ready"
+      ? vision.snapshot.face.guidance
+      : null;
+  useEffect(() => {
+    if (
+      snapshot.state !== "ready" ||
+      vision.snapshot.runtime !== "ready" ||
+      snapshot.width === undefined ||
+      snapshot.height === undefined ||
+      videoRef.current === null ||
+      typeof createImageBitmap !== "function"
+    ) {
+      stopFaceFramePump();
+      return;
+    }
+
+    const height = snapshot.height;
+    const width = snapshot.width;
+    const pump = createBrowserFaceFramePump({
+      video: videoRef.current,
+      now: Date.now,
+      submit: vision.submitFrame,
+    });
+    let active = true;
+    let lastCaptureAtMs = Number.NEGATIVE_INFINITY;
+    faceFramePumpRef.current = pump;
+    const schedule = () => {
+      if (!active) return;
+      const now = Date.now();
+      if (now - lastCaptureAtMs >= 100) {
+        lastCaptureAtMs = now;
+        void pump.tick({
+          generation: snapshot.generation,
+          height,
+          width,
+        });
+      }
+      faceFrameTimerRef.current = setTimeout(schedule, 100);
+    };
+    schedule();
+
+    return () => {
+      active = false;
+      if (faceFrameTimerRef.current !== null) {
+        clearTimeout(faceFrameTimerRef.current);
+        faceFrameTimerRef.current = null;
+      }
+      if (faceFramePumpRef.current === pump) {
+        faceFramePumpRef.current = null;
+      }
+      pump.stop();
+      pump.dispose();
+    };
+  }, [
+    snapshot.generation,
+    snapshot.height,
+    snapshot.state,
+    snapshot.width,
+    stopFaceFramePump,
+    videoRef,
+    vision.snapshot.runtime,
+    vision.submitFrame,
+  ]);
   useEffect(() => {
     const previous = previousOfflineStateRef.current;
     previousOfflineStateRef.current = vision.snapshot.offlineCache;
@@ -511,8 +615,9 @@ export default function App() {
     setFirstUseOffline(false);
     setOfflineAnnouncement("");
     setCameraStartRequest(null);
+    stopFaceFramePump();
     stop();
-  }, [fatalIntegrity, stop]);
+  }, [fatalIntegrity, stop, stopFaceFramePump]);
   useLayoutEffect(() => {
     const enteredPriorityStatus =
       priorityStatus && !previousPriorityStatusRef.current;
@@ -547,6 +652,7 @@ export default function App() {
     setOfflineAnnouncement("");
     consumedCameraStartRef.current = null;
     setCameraStartRequest(null);
+    stopFaceFramePump();
     stop();
     vision.cancel();
   };
@@ -578,6 +684,7 @@ export default function App() {
   };
   const runSwitchCamera = () => {
     setOfflineAnnouncement("");
+    stopFaceFramePump();
     switchCamera();
   };
   const runAction = () => {
@@ -670,7 +777,13 @@ export default function App() {
                       aria-atomic="true"
                       aria-label="Camera status"
                       aria-live="polite"
-                      className="session-status"
+                      className={`session-status${
+                        faceGuidance === "face-ready"
+                          ? " session-status--ready"
+                          : faceGuidance !== null
+                            ? " session-status--warning"
+                            : ""
+                      }`}
                       role="status"
                     >
                       <span

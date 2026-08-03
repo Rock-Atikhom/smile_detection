@@ -699,6 +699,16 @@ h1 {
   line-height: 1.25;
 }
 
+.session-status--ready,
+.session-status--warning {
+  font-weight: 750;
+}
+
+.session-status--warning .session-status__dot {
+  background: #f7c66d;
+  box-shadow: 0 0 0 4px rgb(247 198 109 / 0.2);
+}
+
 .session-status__dot {
   width: 9px;
   height: 9px;

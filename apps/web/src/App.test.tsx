@@ -18,7 +18,23 @@ const vision = vi.hoisted(() => ({
   cancel: vi.fn(),
   prepare: vi.fn<() => Promise<"started" | "first-use-offline" | "failed">>(),
   restart: vi.fn<() => Promise<"started" | "first-use-offline" | "failed">>(),
+  submitFrame: vi.fn(() => true),
   snapshot: {
+    face: {
+      eligible: false,
+      faceCount: 0 as 0 | 1 | 2,
+      guidance: null as
+        | "no-face"
+        | "multiple-faces"
+        | "too-close"
+        | "too-far"
+        | "off-center"
+        | "face-ready"
+        | null,
+      lastSequence: null as number | null,
+      staleResults: 0,
+      state: "idle" as "idle" | "detecting" | "ready" | "error",
+    },
     generation: 1,
     offlineCache: "ready" as "not-ready" | "caching" | "ready" | "error",
     phase: null as "verifying" | "initializing" | null,
@@ -45,7 +61,16 @@ function resetVision() {
   vision.cancel.mockReset();
   vision.prepare.mockReset().mockResolvedValue("started");
   vision.restart.mockReset().mockResolvedValue("started");
+  vision.submitFrame.mockReset().mockReturnValue(true);
   Object.assign(vision.snapshot, {
+    face: {
+      eligible: false,
+      faceCount: 0,
+      guidance: null,
+      lastSequence: null,
+      staleResults: 0,
+      state: "idle",
+    },
     generation: 1,
     offlineCache: "ready",
     phase: null,
@@ -127,6 +152,27 @@ async function findCameraPreview() {
   return getCameraPreview();
 }
 
+const readyFace = {
+  faceCount: 1 as const,
+  lastSequence: 1,
+  staleResults: 0,
+  state: "ready" as const,
+};
+
+async function makeCameraReady() {
+  const { stream } = makeStream();
+  installCamera(() => Promise.resolve(stream));
+  const view = render(<App />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(0);
+  fireEvent.loadedData(getCameraPreview());
+  await vi.runAllTimersAsync();
+
+  return view;
+}
+
 describe("Smart Smile camera session", () => {
   beforeEach(() => {
     resetVision();
@@ -137,6 +183,54 @@ describe("Smart Smile camera session", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it.each([
+    ["no-face", "Show your face"],
+    ["multiple-faces", "Only one person"],
+    ["too-close", "Move back"],
+    ["too-far", "Move closer"],
+    ["off-center", "Center your face"],
+    ["face-ready", "Face ready"],
+  ] as const)("renders %s", async (guidance, text) => {
+    vi.useFakeTimers();
+    const view = await makeCameraReady();
+    vision.snapshot.face = {
+      ...readyFace,
+      guidance,
+      eligible: guidance === "face-ready",
+    };
+    view.rerender(<App />);
+
+    expect(
+      screen.getByRole("status", { name: "Camera status" }),
+    ).toHaveTextContent(text);
+  });
+
+  it("keeps recovery priority and presents one hidden-preview guidance status", async () => {
+    vi.useFakeTimers();
+    const view = await makeCameraReady();
+    vision.snapshot.face = {
+      ...readyFace,
+      guidance: "no-face",
+      eligible: false,
+    };
+    view.rerender(<App />);
+
+    const status = screen.getByRole("status", { name: "Camera status" });
+    expect(status).toHaveTextContent("Show your face");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(getCameraPreview()).toHaveAttribute("aria-hidden", "true");
+    expect(document.querySelector(".capture-zone")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Stop camera" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Switch camera" })).toBeEnabled();
+
+    setVisionIntegrityFailure();
+    view.rerender(<App />);
+    expect(status).toHaveTextContent("Smart Smile could not start safely");
   });
 
   it("keeps the privacy introduction visible and makes no request before the explicit action", () => {
