@@ -135,6 +135,16 @@ async function installFaceEvidenceWorker(page: Page) {
       const frame = worker.latestFrame;
       if (frame === undefined) throw new Error("No current frame to answer");
       const facts = guidanceFacts[guidance];
+      if (
+        overrides.generation === undefined &&
+        overrides.cameraGeneration === undefined &&
+        overrides.sequence === undefined
+      ) {
+        state.lastDeliveredSequence = Math.max(
+          state.lastDeliveredSequence,
+          frame.sequence,
+        );
+      }
       worker.dispatch({
         cameraGeneration: frame.cameraGeneration,
         capturedAtMs: frame.capturedAtMs,
@@ -150,13 +160,6 @@ async function installFaceEvidenceWorker(page: Page) {
         ...facts,
         ...overrides,
       });
-      if (
-        overrides.generation === undefined &&
-        overrides.cameraGeneration === undefined &&
-        overrides.sequence === undefined
-      ) {
-        state.lastDeliveredSequence = frame.sequence;
-      }
     };
 
     const currentWorker = () => state.workers.at(-1);
@@ -172,6 +175,13 @@ async function installFaceEvidenceWorker(page: Page) {
       }
       const next = state.waitForNext;
       if (next === null) return;
+      const ageMs = performance.now() - worker.latestFrame.capturedAtMs;
+      if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > 150) {
+        // Settle the stale in-flight frame so the coordinator can transfer its
+        // pending fresh frame. Keep the waiter until that frame is answered.
+        dispatchEvidence(worker, next.guidance);
+        return;
+      }
       state.waitForNext = null;
       dispatchEvidence(worker, next.guidance);
       next.resolve();

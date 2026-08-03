@@ -64,7 +64,6 @@ export function createFaceFramePump(
       const scale = Math.min(1, 640 / Math.max(input.width, input.height));
       const width = Math.max(1, Math.round(input.width * scale));
       const height = Math.max(1, Math.round(input.height * scale));
-      const capturedAtMs = dependencies.now();
       const generation = input.generation;
       const sequence = nextSequence++;
       const captureEpoch = epoch;
@@ -83,6 +82,7 @@ export function createFaceFramePump(
 
         let accepted: boolean;
         try {
+          const capturedAtMs = dependencies.now();
           accepted = dependencies.submit({
             type: "FRAME",
             generation,

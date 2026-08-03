@@ -117,6 +117,58 @@ describe("face frame pump", () => {
     expect(submit).toHaveBeenCalledOnce();
   });
 
+  it("timestamps the completed bitmap immediately before submission", async () => {
+    const pending = deferredBitmap();
+    const image = bitmap();
+    let monotonicNow = 100;
+    const submit = vi.fn(() => true);
+    const pump = createFaceFramePump({
+      capture: vi.fn(() => pending.promise),
+      now: () => monotonicNow,
+      submit,
+    });
+
+    const tick = pump.tick({
+      generation: 2,
+      cameraGeneration: 4,
+      width: 640,
+      height: 360,
+    });
+    monotonicNow = 275;
+    pending.resolve(image);
+
+    await expect(tick).resolves.toBe(true);
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ capturedAtMs: 275, bitmap: image }),
+    );
+  });
+
+  it("closes an invalidated delayed capture without timestamping or submitting it", async () => {
+    const pending = deferredBitmap();
+    const image = bitmap();
+    const now = vi.fn(() => 275);
+    const submit = vi.fn(() => true);
+    const pump = createFaceFramePump({
+      capture: vi.fn(() => pending.promise),
+      now,
+      submit,
+    });
+
+    const tick = pump.tick({
+      generation: 2,
+      cameraGeneration: 4,
+      width: 640,
+      height: 360,
+    });
+    pump.stop();
+    pending.resolve(image);
+
+    await expect(tick).resolves.toBe(false);
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(now).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("closes a captured bitmap when submission fails", async () => {
     const image = bitmap();
     const pump = createFaceFramePump({
