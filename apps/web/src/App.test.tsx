@@ -207,7 +207,7 @@ describe("Smart Smile camera session", () => {
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
-  it("does not authorize camera when verified cache preparation fails", async () => {
+  it("does not authorize camera when vision preflight fails closed", async () => {
     vision.prepare.mockImplementation(async () => {
       Object.assign(vision.snapshot, {
         offlineCache: "error",
@@ -238,6 +238,38 @@ describe("Smart Smile camera session", () => {
     expect(screen.getByRole("status")).not.toHaveTextContent(
       "offline-cache-failed",
     );
+  });
+
+  it("keeps camera authorization when only offline cache setup fails", async () => {
+    vision.prepare.mockImplementation(async () => {
+      Object.assign(vision.snapshot, {
+        offlineCache: "error",
+        phase: "verifying",
+        reason: "offline-cache-failed",
+        retryAvailable: true,
+        runtime: "preparing",
+        wasmTier: "unknown",
+      });
+      return "started";
+    });
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>(() => undefined));
+    installCamera(getUserMedia);
+    const view = render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+
+    await waitFor(() => expect(vision.prepare).toHaveBeenCalledOnce());
+    view.rerender(<App />);
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledOnce());
+    fireEvent.click(
+      screen.getByRole("button", { name: "Help & system status" }),
+    );
+    const status = screen.getByRole("dialog", {
+      name: "Help & system status",
+    });
+    expect(
+      within(status).getByText("Offline use").nextSibling,
+    ).toHaveTextContent("Needs attention");
   });
 
   it("shows permission-pending copy after preflight and requests video only", async () => {

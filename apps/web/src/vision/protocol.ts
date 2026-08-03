@@ -2,7 +2,7 @@ export type VisionWasmTier = "unknown" | "simd" | "baseline";
 export type VisionRuntimeState = "idle" | "preparing" | "ready" | "error";
 export type VisionOfflineState = "not-ready" | "caching" | "ready" | "error";
 export const VISION_SERVICE_WORKER_PROTOCOL =
-  "smart-smile-vision-sw-v1" as const;
+  "smart-smile-vision-sw-v2" as const;
 
 export type VisionServiceWorkerHandshakeCommand = {
   type: "VISION_SW_HANDSHAKE";

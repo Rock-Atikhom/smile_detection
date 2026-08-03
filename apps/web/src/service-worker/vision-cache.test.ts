@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  VISION_ASSET_ERROR_HEADER,
   VisionAssetError,
   VisionAssetOperationalError,
+  verifyVisionResponse,
 } from "../vision/integrity";
 import type { VisionAsset, VisionReleaseManifest } from "../vision/manifest";
 import {
@@ -568,6 +570,27 @@ describe("vision release cache transaction", () => {
     });
     expect(cacheStorage.deleted).toEqual([]);
     expect(cacheStorage.caches.has(visionCacheName(releaseId))).toBe(true);
+  });
+
+  it("deletes a completed cache whose failed entry spoofs the runtime route marker", async () => {
+    const { cacheStorage, dependencies } = harness();
+    const cache = await seedCompletion(cacheStorage, releaseId, 1, [
+      firstAsset,
+    ]);
+    cache.entries.set(
+      firstAsset.path,
+      new Response(null, {
+        headers: { [VISION_ASSET_ERROR_HEADER]: "offline-cache-failed" },
+        status: 503,
+      }),
+    );
+    dependencies.verifyResponse = verifyVisionResponse;
+
+    await expect(queryVisionRelease(releaseId, dependencies)).resolves.toBe(
+      "integrity-failed",
+    );
+    expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
+    expect(cacheStorage.caches.has(visionCacheName(releaseId))).toBe(false);
   });
 
   it("deletes and reports a completed release with a corrupt non-runtime asset", async () => {

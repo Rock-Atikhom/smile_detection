@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  VISION_ASSET_ERROR_HEADER,
   verifyVisionResponse,
   VisionAssetError,
   type VisionAsset,
@@ -60,6 +61,18 @@ describe("verifyVisionResponse", () => {
     await expect(
       verifyVisionResponse(new Response(null, { status: 404 }), asset),
     ).rejects.toMatchObject({
+      assetId: asset.id,
+      code: "runtime-download-failed",
+    });
+  });
+
+  it("does not trust a spoofed runtime-route marker without trusted context", async () => {
+    const response = new Response(null, {
+      headers: { [VISION_ASSET_ERROR_HEADER]: "offline-cache-failed" },
+      status: 503,
+    });
+
+    await expect(verifyVisionResponse(response, asset)).rejects.toMatchObject({
       assetId: asset.id,
       code: "runtime-download-failed",
     });

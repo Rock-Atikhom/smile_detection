@@ -205,6 +205,55 @@ describe("VisionCacheClient", () => {
     await expect(pendingClient).resolves.toBeDefined();
   });
 
+  it("rejects a prior-protocol controller until the replacement proves the current contract", async () => {
+    const serviceWorker = new FakeServiceWorkerContainer();
+    serviceWorker.autoHandshake = false;
+    const oldController = serviceWorker.worker;
+    const replacementMessages: Array<
+      VisionCacheCommand | VisionServiceWorkerHandshakeCommand
+    > = [];
+    const replacement = {
+      postMessage: vi.fn(
+        (message: VisionCacheCommand | VisionServiceWorkerHandshakeCommand) => {
+          replacementMessages.push(message);
+        },
+      ),
+    } as typeof serviceWorker.worker;
+    let settled = false;
+    const pendingClient = registerApplicationServiceWorker({ serviceWorker });
+    void pendingClient.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const oldHandshake = serviceWorker.handshakes[0]!;
+
+    serviceWorker.dispatch(
+      {
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: oldHandshake.requestId,
+        protocol: "smart-smile-vision-sw-v1",
+      },
+      oldController,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(serviceWorker.controllerListeners.size).toBe(1);
+    expect(settled).toBe(false);
+
+    serviceWorker.changeController(replacement);
+    const replacementHandshake = replacementMessages[0]!;
+    serviceWorker.dispatch(
+      {
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: replacementHandshake.requestId,
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      },
+      replacement,
+    );
+    await expect(pendingClient).resolves.toBeDefined();
+  });
+
   it("rejects malformed or version-mismatched controller proof and times out as indeterminate", async () => {
     vi.useFakeTimers();
     const serviceWorker = new FakeServiceWorkerContainer();

@@ -244,30 +244,59 @@ export class VisionCoordinator {
         wasmTier: "unknown",
       });
       if (!this.isCurrentPreflight(active)) return "failed";
-
-      const result = await this.populateCache(active);
-      if (!this.isCurrentPreflight(active)) return "failed";
-      if (result !== "ready") {
-        this.activePreflight = undefined;
-        if (result === "integrity-failed") {
-          this.publishIntegrityFailure();
-        } else {
-          this.publish({
-            offlineCache: "error",
-            phase: null,
-            reason: "offline-cache-failed",
-            retryAvailable: true,
-            runtime: "error",
-            wasmTier: "unknown",
-          });
-        }
-        return "failed";
-      }
-      this.publish({ offlineCache: "ready" });
     }
 
+    const workerStarted = this.startWorker(
+      active.generation,
+      cacheState === "ready" ? "ready" : "caching",
+    );
+    if (!this.isCurrentPreflight(active)) return "failed";
+    if (cacheState === "missing") {
+      void this.completeCachePopulation(active);
+    } else {
+      this.activePreflight = undefined;
+    }
+    return workerStarted ? "started" : "failed";
+  }
+
+  private async completeCachePopulation(
+    active: ActivePreflight,
+  ): Promise<void> {
+    const result = await this.populateCache(active);
+    if (!this.isCurrentPreflight(active)) return;
     this.activePreflight = undefined;
-    return this.startWorker(active.generation) ? "started" : "failed";
+
+    if (result === "integrity-failed") {
+      const worker = this.activeWorker;
+      if (worker?.generation === active.generation) {
+        try {
+          worker.port.postMessage({
+            type: "CANCEL",
+            generation: active.generation,
+          });
+        } catch {
+          // Termination below is the authoritative cleanup boundary.
+        }
+        this.closeWorker(worker);
+      }
+      this.publishIntegrityFailure();
+      return;
+    }
+
+    if (result === "error") {
+      this.publish({
+        offlineCache: "error",
+        ...(this.snapshotValue.runtime === "error"
+          ? {}
+          : {
+              reason: "offline-cache-failed" as const,
+              retryAvailable: true,
+            }),
+      });
+      return;
+    }
+
+    this.publish({ offlineCache: "ready" });
   }
 
   private async populateCache(
@@ -313,13 +342,16 @@ export class VisionCoordinator {
     );
   }
 
-  private startWorker(generation: number): boolean {
+  private startWorker(
+    generation: number,
+    offlineCache: VisionOfflineState,
+  ): boolean {
     let worker: VisionWorkerPort;
     try {
       worker = this.dependencies.createWorker();
     } catch {
       this.publish({
-        offlineCache: "ready",
+        offlineCache,
         runtime: "error",
         phase: null,
         reason: "runtime-initialization-failed",
@@ -337,7 +369,7 @@ export class VisionCoordinator {
     this.activeWorker = active;
     worker.addEventListener("message", active.listener);
     this.publish({
-      offlineCache: "ready",
+      offlineCache,
       phase: "verifying",
       reason: null,
       retryAvailable: false,
@@ -424,6 +456,11 @@ export class VisionCoordinator {
 
     active.settled = true;
     if (value.code === "runtime-integrity-failed") {
+      const preflight = this.activePreflight;
+      if (preflight?.generation === active.generation) {
+        preflight.controller.abort();
+        this.activePreflight = undefined;
+      }
       this.cancelActiveCache(active.generation);
     }
     this.publish({

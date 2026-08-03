@@ -4,6 +4,13 @@ import type { VisionReason } from "./protocol";
 export type { VisionAsset } from "./manifest";
 
 export const VISION_ASSET_ERROR_HEADER = "x-smart-smile-vision-error";
+export type VisionResponseVerificationContext =
+  | { source: "untrusted" }
+  | { source: "verified-service-worker-immutable-route" };
+
+const UNTRUSTED_RESPONSE_CONTEXT: VisionResponseVerificationContext = {
+  source: "untrusted",
+};
 
 export class VisionAssetError extends Error {
   readonly assetId: string;
@@ -71,9 +78,11 @@ function toHex(bytes: Uint8Array): string {
 export async function verifyVisionResponse(
   response: Response,
   asset: VisionAsset,
+  context: VisionResponseVerificationContext = UNTRUSTED_RESPONSE_CONTEXT,
 ): Promise<Uint8Array> {
   if (!response.ok) {
     if (
+      context.source === "verified-service-worker-immutable-route" &&
       response.headers.get(VISION_ASSET_ERROR_HEADER) === "offline-cache-failed"
     ) {
       throw new VisionAssetOperationalError(asset.id);

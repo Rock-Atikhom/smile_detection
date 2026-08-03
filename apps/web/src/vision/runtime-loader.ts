@@ -178,7 +178,9 @@ async function loadVerifiedAsset(
   const response = await fetchResponse(asset.path, signal, dependencies);
   throwIfCancelled(signal);
   try {
-    const bytes = await verifyVisionResponse(response, asset);
+    const bytes = await verifyVisionResponse(response, asset, {
+      source: "verified-service-worker-immutable-route",
+    });
     throwIfCancelled(signal);
     return bytes;
   } catch (error) {

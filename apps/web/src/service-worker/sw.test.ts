@@ -404,7 +404,9 @@ describe("vision service worker", () => {
     } as never);
 
     const response = await responsePromise;
-    const verification = verifyVisionResponse(response, asset);
+    const verification = verifyVisionResponse(response, asset, {
+      source: "verified-service-worker-immutable-route",
+    });
     await expect(verification).rejects.toMatchObject({
       assetId: asset.id,
       code: "offline-cache-failed",
