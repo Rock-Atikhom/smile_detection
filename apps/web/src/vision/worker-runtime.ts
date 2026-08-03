@@ -116,6 +116,9 @@ export function createVisionWorkerRuntime(
     candidate: ActiveGeneration,
     frame: Extract<VisionWorkerCommand, { type: "FRAME" }>,
   ): void => {
+    let inferenceFailure:
+      | { code: VisionReason; recoverable: boolean }
+      | undefined;
     try {
       const prepared = candidate.prepared;
       if (!isCurrent(candidate) || prepared === undefined) {
@@ -140,10 +143,18 @@ export function createVisionWorkerRuntime(
         tier: frame.tier,
         ...evidence,
       });
-    } catch {
-      // Inference failures remain inside the worker boundary.
+    } catch (error) {
+      inferenceFailure = mapFailure(error);
     } finally {
       closeBitmap(frame.bitmap);
+    }
+
+    if (inferenceFailure !== undefined && isCurrent(candidate)) {
+      postMessage({
+        type: "ERROR",
+        generation: candidate.generation,
+        ...inferenceFailure,
+      });
     }
   };
 

@@ -358,7 +358,7 @@ describe("createVisionWorkerRuntime", () => {
   });
 
   it("closes frames for an old generation without inference", async () => {
-    const { instance, runtime } = readyRuntime();
+    const { instance, postMessage, runtime } = readyRuntime();
     const image = bitmap();
 
     await flushPromises();
@@ -366,6 +366,9 @@ describe("createVisionWorkerRuntime", () => {
 
     expect(image.close).toHaveBeenCalledOnce();
     expect(instance.detectForVideo).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ERROR" }),
+    );
   });
 
   it("closes a frame received after the generation is cancelled", async () => {
@@ -381,6 +384,9 @@ describe("createVisionWorkerRuntime", () => {
     expect(instance.detectForVideo).not.toHaveBeenCalled();
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ERROR" }),
     );
   });
 
@@ -400,12 +406,48 @@ describe("createVisionWorkerRuntime", () => {
     );
   });
 
-  it("closes an active frame when inference throws", async () => {
+  it("closes an active frame and posts one safe ERROR when inference throws", async () => {
     const instance = prepared();
     instance.detectForVideo.mockImplementationOnce(() => {
-      throw new Error("inference failed");
+      throw new Error("private inference details");
     });
     const { postMessage, runtime } = readyRuntime(instance);
+    const close = vi.fn<() => void>();
+    const image = { close } as unknown as ImageBitmap;
+
+    await flushPromises();
+    runtime.receive(frame(4, image));
+
+    expect(close).toHaveBeenCalledOnce();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+    const errors = postMessage.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.type === "ERROR");
+    expect(errors).toEqual([
+      {
+        type: "ERROR",
+        generation: 4,
+        code: "runtime-initialization-failed",
+        recoverable: true,
+      },
+    ]);
+    expect(close.mock.invocationCallOrder[0]).toBeLessThan(
+      postMessage.mock.invocationCallOrder.at(-1) ?? 0,
+    );
+    expect(JSON.stringify(postMessage.mock.calls)).not.toContain(
+      "private inference details",
+    );
+  });
+
+  it("suppresses inference ERROR after the generation is disposed", async () => {
+    const instance = prepared();
+    const { postMessage, runtime } = readyRuntime(instance);
+    instance.detectForVideo.mockImplementationOnce(() => {
+      runtime.dispose();
+      throw new Error("private inference details");
+    });
     const image = bitmap();
 
     await flushPromises();
@@ -414,6 +456,9 @@ describe("createVisionWorkerRuntime", () => {
     expect(image.close).toHaveBeenCalledOnce();
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ERROR" }),
     );
   });
 
