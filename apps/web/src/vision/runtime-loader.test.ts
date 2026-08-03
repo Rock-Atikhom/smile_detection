@@ -1,4 +1,7 @@
-import type { FaceLandmarkerOptions } from "@mediapipe/tasks-vision";
+import type {
+  FaceLandmarkerOptions,
+  FaceLandmarkerResult,
+} from "@mediapipe/tasks-vision";
 import { describe, expect, it, vi } from "vitest";
 import {
   prepareVisionRuntime,
@@ -38,6 +41,28 @@ const paths: Record<CriticalRole, string> = {
   "wasm-loader-simd": `${VISION_RELEASE_PATH_PREFIX}vision_wasm_internal.js`,
   "wasm-binary-simd": `${VISION_RELEASE_PATH_PREFIX}vision_wasm_internal.wasm`,
 };
+
+type PreparedLandmarkerFixture = Awaited<
+  ReturnType<VisionRuntimeDependencies["createLandmarker"]>
+>;
+
+function faceLandmarkerResult(): FaceLandmarkerResult {
+  return {
+    faceBlendshapes: [],
+    faceLandmarks: [],
+    facialTransformationMatrixes: [],
+  };
+}
+
+function landmarkerFixture(
+  overrides: Partial<PreparedLandmarkerFixture> = {},
+): PreparedLandmarkerFixture {
+  return {
+    close: vi.fn(),
+    detectForVideo: vi.fn(() => faceLandmarkerResult()),
+    ...overrides,
+  };
+}
 
 async function sha256(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes));
@@ -98,10 +123,7 @@ async function createDependencies(options?: {
         .buffer,
     );
   });
-  const createLandmarker = vi.fn(async () => ({
-    close: vi.fn(),
-    detectForVideo: vi.fn(),
-  }));
+  const createLandmarker = vi.fn(async () => landmarkerFixture());
 
   return {
     createLandmarker,
@@ -156,11 +178,8 @@ describe("prepareVisionRuntime", () => {
 
   it("retains video inference on the prepared runtime", async () => {
     const { createLandmarker, dependencies } = await createDependencies();
-    const detectForVideo = vi.fn(() => ({
-      faceBlendshapes: [],
-      faceLandmarks: [],
-    }));
-    createLandmarker.mockResolvedValue({ close: vi.fn(), detectForVideo });
+    const detectForVideo = vi.fn(() => faceLandmarkerResult());
+    createLandmarker.mockResolvedValue(landmarkerFixture({ detectForVideo }));
     const bitmap = {} as ImageBitmap;
 
     const prepared = await prepare(dependencies);
@@ -234,7 +253,7 @@ describe("prepareVisionRuntime", () => {
     const { createLandmarker, dependencies } = await createDependencies();
     createLandmarker
       .mockRejectedValueOnce(failure)
-      .mockResolvedValueOnce({ close: vi.fn() });
+      .mockResolvedValueOnce(landmarkerFixture());
 
     const result = await prepare(dependencies);
 
@@ -367,8 +386,8 @@ describe("prepareVisionRuntime", () => {
 
   it("closes an instance that finishes construction after cancellation", async () => {
     const { createLandmarker, dependencies } = await createDependencies();
-    let resolveLandmarker!: (value: { close(): void }) => void;
-    const construction = new Promise<{ close(): void }>((resolve) => {
+    let resolveLandmarker!: (value: PreparedLandmarkerFixture) => void;
+    const construction = new Promise<PreparedLandmarkerFixture>((resolve) => {
       resolveLandmarker = resolve;
     });
     const close = vi.fn();
@@ -378,7 +397,7 @@ describe("prepareVisionRuntime", () => {
     const pending = prepare(dependencies, controller.signal);
     await vi.waitFor(() => expect(createLandmarker).toHaveBeenCalledOnce());
     controller.abort();
-    resolveLandmarker({ close });
+    resolveLandmarker(landmarkerFixture({ close }));
 
     await expect(pending).rejects.toMatchObject({
       code: "runtime-cancelled",
@@ -392,7 +411,7 @@ describe("prepareVisionRuntime", () => {
     const close = vi.fn(() => {
       throw new Error("private close details");
     });
-    createLandmarker.mockResolvedValue({ close });
+    createLandmarker.mockResolvedValue(landmarkerFixture({ close }));
     const result = await prepare(dependencies);
 
     expect(() => {

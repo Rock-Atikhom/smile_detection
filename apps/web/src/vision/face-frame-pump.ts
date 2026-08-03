@@ -70,6 +70,7 @@ export function createFaceFramePump(
       captureInProgress = true;
 
       try {
+        const capturedAtMs = dependencies.now();
         const bitmap = await dependencies.capture({ width, height });
         if (
           disposed ||
@@ -82,7 +83,6 @@ export function createFaceFramePump(
 
         let accepted: boolean;
         try {
-          const capturedAtMs = dependencies.now();
           accepted = dependencies.submit({
             type: "FRAME",
             generation,

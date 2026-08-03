@@ -46,8 +46,21 @@ export interface VisionWorkerPort {
     type: "message",
     listener: (event: MessageEvent<unknown>) => void,
   ): void;
+  addEventListener(type: "error", listener: (event: ErrorEvent) => void): void;
+  addEventListener(
+    type: "messageerror",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
   removeEventListener(
     type: "message",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  removeEventListener(
+    type: "error",
+    listener: (event: ErrorEvent) => void,
+  ): void;
+  removeEventListener(
+    type: "messageerror",
     listener: (event: MessageEvent<unknown>) => void,
   ): void;
 }
@@ -70,8 +83,10 @@ interface ActivePreflight {
 }
 
 interface ActiveWorker {
+  errorListener: (event: ErrorEvent) => void;
   generation: number;
   listener: (event: MessageEvent<unknown>) => void;
+  messageErrorListener: (event: MessageEvent<unknown>) => void;
   port: VisionWorkerPort;
   ready: boolean;
 }
@@ -426,13 +441,20 @@ export class VisionCoordinator {
     }
 
     const active: ActiveWorker = {
+      errorListener: (event) => {
+        event.preventDefault();
+        this.receiveWorkerFault(active);
+      },
       generation,
       listener: (event) => this.receiveWorkerEvent(active, event.data),
+      messageErrorListener: () => this.receiveWorkerFault(active),
       port: worker,
       ready: false,
     };
     this.activeWorker = active;
     worker.addEventListener("message", active.listener);
+    worker.addEventListener("error", active.errorListener);
+    worker.addEventListener("messageerror", active.messageErrorListener);
     this.publish({
       offlineCache,
       phase: "verifying",
@@ -556,6 +578,19 @@ export class VisionCoordinator {
     this.closeWorker(active);
   }
 
+  private receiveWorkerFault(active: ActiveWorker): void {
+    if (!this.ownsWorker(active)) return;
+    this.closeWorker(active);
+    this.publish({
+      phase: null,
+      reason: "runtime-initialization-failed",
+      retryAvailable: true,
+      runtime: "error",
+      wasmTier: "unknown",
+      face: this.errorFaceSnapshot(),
+    });
+  }
+
   private invalidateCurrent(): void {
     this.activePreflight?.controller.abort();
     this.activePreflight = undefined;
@@ -590,6 +625,11 @@ export class VisionCoordinator {
     if (this.activeWorker !== active) return;
     this.resetFrameAdmission();
     active.port.removeEventListener("message", active.listener);
+    active.port.removeEventListener("error", active.errorListener);
+    active.port.removeEventListener(
+      "messageerror",
+      active.messageErrorListener,
+    );
     active.port.terminate();
     this.activeWorker = undefined;
   }

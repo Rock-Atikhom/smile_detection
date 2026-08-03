@@ -27,32 +27,91 @@ class FakeWorker implements VisionWorkerPort {
       this.messages.push(message);
     },
   );
-  private readonly listeners = new Set<
+  private readonly messageListeners = new Set<
+    (event: MessageEvent<unknown>) => void
+  >();
+  private readonly errorListeners = new Set<(event: ErrorEvent) => void>();
+  private readonly messageErrorListeners = new Set<
     (event: MessageEvent<unknown>) => void
   >();
 
   addEventListener(
-    _type: "message",
+    type: "message",
     listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  addEventListener(type: "error", listener: (event: ErrorEvent) => void): void;
+  addEventListener(
+    type: "messageerror",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  addEventListener(
+    type: "message" | "error" | "messageerror",
+    listener:
+      ((event: MessageEvent<unknown>) => void) | ((event: ErrorEvent) => void),
   ) {
-    this.listeners.add(listener);
+    if (type === "message") {
+      this.messageListeners.add(
+        listener as (event: MessageEvent<unknown>) => void,
+      );
+    } else if (type === "error") {
+      this.errorListeners.add(listener as (event: ErrorEvent) => void);
+    } else {
+      this.messageErrorListeners.add(
+        listener as (event: MessageEvent<unknown>) => void,
+      );
+    }
   }
 
   removeEventListener(
-    _type: "message",
+    type: "message",
     listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  removeEventListener(
+    type: "error",
+    listener: (event: ErrorEvent) => void,
+  ): void;
+  removeEventListener(
+    type: "messageerror",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  removeEventListener(
+    type: "message" | "error" | "messageerror",
+    listener:
+      ((event: MessageEvent<unknown>) => void) | ((event: ErrorEvent) => void),
   ) {
-    this.listeners.delete(listener);
+    if (type === "message") {
+      this.messageListeners.delete(
+        listener as (event: MessageEvent<unknown>) => void,
+      );
+    } else if (type === "error") {
+      this.errorListeners.delete(listener as (event: ErrorEvent) => void);
+    } else {
+      this.messageErrorListeners.delete(
+        listener as (event: MessageEvent<unknown>) => void,
+      );
+    }
   }
 
   dispatch(data: VisionWorkerEvent | unknown) {
-    for (const listener of this.listeners) {
+    for (const listener of this.messageListeners) {
       listener({ data } as MessageEvent<unknown>);
     }
   }
 
+  dispatchEvent(event: ErrorEvent | MessageEvent<unknown>) {
+    const listeners =
+      event.type === "error" ? this.errorListeners : this.messageErrorListeners;
+    for (const listener of listeners) {
+      listener(event as ErrorEvent & MessageEvent<unknown>);
+    }
+  }
+
   get listenerCount() {
-    return this.listeners.size;
+    return (
+      this.messageListeners.size +
+      this.errorListeners.size +
+      this.messageErrorListeners.size
+    );
   }
 }
 
@@ -475,6 +534,56 @@ describe("VisionCoordinator", () => {
     const rejected = frame(2);
     expect(harness.coordinator.submitFrame(rejected)).toBe(false);
     expect(rejected.bitmap.close).not.toHaveBeenCalled();
+  });
+
+  it.each(["error", "messageerror"] as const)(
+    "fails safely and releases coordinator ownership on native worker %s",
+    async (eventType) => {
+      const harness = createHarness();
+      const worker = await readyWorker(harness);
+      const transferred = frame(0);
+      const pending = frame(1);
+      harness.coordinator.submitFrame(transferred);
+      harness.coordinator.submitFrame(pending);
+
+      worker.dispatchEvent(
+        eventType === "error"
+          ? new ErrorEvent("error", { message: "private worker details" })
+          : new MessageEvent("messageerror", { data: "private payload" }),
+      );
+
+      expect(pending.bitmap.close).toHaveBeenCalledOnce();
+      expect(transferred.bitmap.close).not.toHaveBeenCalled();
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(worker.listenerCount).toBe(0);
+      expect(harness.snapshot()).toMatchObject({
+        runtime: "error",
+        reason: "runtime-initialization-failed",
+        retryAvailable: true,
+        face: { state: "error" },
+      });
+      expect(JSON.stringify(harness.snapshot())).not.toContain("private");
+      expect(harness.coordinator.submitFrame(frame(2))).toBe(false);
+    },
+  );
+
+  it("ignores a stale native worker error after a newer generation starts", async () => {
+    const harness = createHarness();
+    const oldWorker = await readyWorker(harness);
+
+    await harness.coordinator.restart();
+    const currentWorker = harness.workers.at(-1)!;
+    oldWorker.dispatchEvent(
+      new ErrorEvent("error", { message: "late private worker details" }),
+    );
+
+    expect(harness.snapshot()).toMatchObject({
+      generation: 1,
+      runtime: "preparing",
+      reason: null,
+      face: { state: "idle" },
+    });
+    expect(currentWorker.terminate).not.toHaveBeenCalled();
   });
 
   it("returns untransferred ownership and terminates admission when postMessage throws", async () => {

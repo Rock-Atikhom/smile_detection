@@ -117,7 +117,7 @@ describe("face frame pump", () => {
     expect(submit).toHaveBeenCalledOnce();
   });
 
-  it("timestamps the completed bitmap immediately before submission", async () => {
+  it("timestamps the source frame immediately before capture begins", async () => {
     const pending = deferredBitmap();
     const image = bitmap();
     let monotonicNow = 100;
@@ -139,11 +139,11 @@ describe("face frame pump", () => {
 
     await expect(tick).resolves.toBe(true);
     expect(submit).toHaveBeenCalledWith(
-      expect.objectContaining({ capturedAtMs: 275, bitmap: image }),
+      expect.objectContaining({ capturedAtMs: 100, bitmap: image }),
     );
   });
 
-  it("closes an invalidated delayed capture without timestamping or submitting it", async () => {
+  it("closes an invalidated delayed capture without submitting it", async () => {
     const pending = deferredBitmap();
     const image = bitmap();
     const now = vi.fn(() => 275);
@@ -165,7 +165,7 @@ describe("face frame pump", () => {
 
     await expect(tick).resolves.toBe(false);
     expect(image.close).toHaveBeenCalledOnce();
-    expect(now).not.toHaveBeenCalled();
+    expect(now).toHaveBeenCalledOnce();
     expect(submit).not.toHaveBeenCalled();
   });
 
