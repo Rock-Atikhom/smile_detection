@@ -4,7 +4,7 @@
 
 **Goal:** Process bounded camera frames with the existing MediaPipe worker and show privacy-safe zero/one/multiple-face framing guidance.
 
-**Architecture:** Extend the existing classic vision worker with an exact frame/evidence protocol and a one-running/one-latest mailbox. Geometry is classified and discarded in the worker; the main-thread coordinator accepts only fresh current-generation categorical evidence, while a small frame pump transfers aspect-preserving ImageBitmaps from the existing camera video element.
+**Architecture:** Extend the existing classic vision worker with an exact frame/evidence protocol. Because MediaPipe inference is synchronous, the main-thread coordinator owns a one-transferred-in-flight/one-latest-pending mailbox and transfers no second frame until matching evidence settles the first. Geometry is classified and discarded in the worker; the coordinator accepts only fresh current-generation categorical evidence, while a small frame pump creates aspect-preserving ImageBitmaps from the existing camera video element.
 
 **Tech Stack:** React 19, TypeScript 6, Vite 8, MediaPipe Tasks Vision 0.10.35, classic Web Worker, ImageBitmap, Vitest 4, Testing Library, Playwright 1.62.
 
@@ -18,7 +18,7 @@
 - Guidance priority: no-face, multiple-faces, too-close, too-far, off-center, face-ready.
 - Carry generation, sequence, monotonic capture timestamp, dimensions, orientation, and tier on every frame and evidence message.
 - Reject old-generation, duplicate, out-of-order, malformed, and older-than-150-ms results.
-- Keep at most one running and one latest pending ImageBitmap. Close replaced, processed, cancelled, rejected, and failed bitmaps exactly once.
+- Keep at most one transferred in-flight frame and one latest pending ImageBitmap end to end. The coordinator closes replaced/cancelled pending bitmaps; the worker closes processed/rejected/failed transferred bitmaps exactly once.
 - Landmark arrays, blendshapes, boxes, coordinates, matrices, frames, object URLs, and identifiers never enter React state, persistence, diagnostics export, service-worker cache, or network traffic.
 - Video and decorative Capture Zone remain aria-hidden; equivalent guidance uses the existing polite atomic semantic status.
 - Preserve the documented Ticket 03 first-load blocker. Development may use a completed-cache reopen, but the preview is not release-ready until the Ticket 03 runtime journey passes.
@@ -30,7 +30,7 @@
 - Create apps/web/src/vision/face-evidence.ts and its test for pure geometry classification.
 - Modify apps/web/src/vision/protocol.ts and its test for exact frame/evidence envelopes.
 - Modify runtime-loader.ts and its test to retain detectForVideo on the prepared runtime.
-- Modify worker-runtime.ts, worker-runtime.test.ts, and worker.ts for the bounded mailbox.
+- Modify worker-runtime.ts, worker-runtime.test.ts, and worker.ts for synchronous inference and exact transferred-bitmap settlement.
 - Modify coordinator.ts and its test for frame submission and freshness filtering.
 - Create face-frame-pump.ts and its test for aspect-preserving capture.
 - Modify useVisionRuntime.ts and its test to expose frame submission.
@@ -329,7 +329,7 @@ git commit -m "feat: retain face inference runtime"
 
 ---
 
-### Task 4: Add the bounded worker mailbox
+### Task 4: Settle synchronous worker frames safely
 
 **Files:**
 
@@ -340,20 +340,17 @@ git commit -m "feat: retain face inference runtime"
 **Interfaces:**
 
 - Consumes: Task 2 FRAME and Task 3 detectForVideo.
-- Produces: FACE_EVIDENCE events and exact ImageBitmap disposal.
+- Produces: FACE_EVIDENCE completion events and exact worker-owned ImageBitmap disposal.
 
 - [ ] **Step 1: Write failing ownership tests**
 
-Use controllable inference promises. Submit A, B, then C while A runs. Assert B closes immediately, A closes in finally, and C alone runs next. Add cases for FRAME before READY, old generation, CANCEL, dispose, inference throw, malformed input, and pending replacement.
+Use the real synchronous `detectForVideo` contract. Assert each accepted frame produces categorical evidence and closes in `finally`. Add cases for FRAME before READY, old generation, CANCEL, dispose, inference throw, and malformed plain/non-plain FRAME-like input. Every rejected transferable bitmap must close even when the exact protocol guard rejects its envelope.
 
 ```ts
 runtime.receive(frame(1, bitmapA));
-runtime.receive(frame(2, bitmapB));
-runtime.receive(frame(3, bitmapC));
-expect(bitmapB.close).toHaveBeenCalledOnce();
-finishA({ faceLandmarks: [eligibleFace], faceBlendshapes: [] });
-await vi.waitFor(() => expect(bitmapA.close).toHaveBeenCalledOnce());
-expect(detectForVideo).toHaveBeenLastCalledWith(bitmapC, expect.any(Number));
+expect(detectForVideo).toHaveBeenCalledWith(bitmapA, expect.any(Number));
+expect(bitmapA.close).toHaveBeenCalledOnce();
+expect(posted.at(-1)).toMatchObject({ type: "FACE_EVIDENCE", sequence: 1 });
 ```
 
 - [ ] **Step 2: Verify RED**
@@ -362,19 +359,17 @@ Run: npm exec -- vitest run src/vision/worker-runtime.test.ts
 
 Expected: frame commands are ignored without correct closure or evidence.
 
-- [ ] **Step 3: Implement one-running/one-pending ownership**
+- [ ] **Step 3: Implement synchronous worker settlement**
 
 ```ts
 interface ActiveGeneration {
   controller: AbortController;
   generation: number;
   prepared?: PreparedVisionRuntime;
-  processing: boolean;
-  pending?: VisionFrameCommand;
 }
 ```
 
-replacePending closes the old pending bitmap. processFrame calls detectForVideo, classifies landmarks, posts FACE_EVIDENCE only while current, closes the processed bitmap in finally, then promotes the latest pending frame. closeGeneration closes pending before the landmarker.
+processFrame calls synchronous detectForVideo, classifies landmarks, posts FACE_EVIDENCE only while current, and closes the processed bitmap in finally. Reject malformed FRAME-like envelopes through a safe own-data-property probe that closes any closeable transferred bitmap without invoking accessors. Producer-side bounded admission is implemented in Task 5.
 
 - [ ] **Step 4: Prove no raw result crosses worker.ts**
 
@@ -391,7 +386,7 @@ git commit -m "feat: process latest face frame in worker"
 
 ---
 
-### Task 5: Validate evidence and pump frames
+### Task 5: Validate evidence, enforce producer backpressure, and pump frames
 
 **Files:**
 
@@ -405,7 +400,7 @@ git commit -m "feat: process latest face frame in worker"
 **Interfaces:**
 
 - Consumes: Task 2 evidence and camera video/generation.
-- Produces: VisionFaceSnapshot, submitFrame(), and an aspect-preserving pump.
+- Produces: VisionFaceSnapshot, bounded submitFrame(), and an aspect-preserving pump.
 
 - [ ] **Step 1: Write failing freshness/order tests**
 
@@ -424,14 +419,14 @@ expect(harness.snapshot().face.lastSequence).toBe(8);
 expect(harness.snapshot().face.staleResults).toBe(1);
 ```
 
-- [ ] **Step 2: Write failing transferable submission tests**
+- [ ] **Step 2: Write failing transferable mailbox tests**
 
 ```ts
 expect(coordinator.submitFrame(command)).toBe(true);
 expect(worker.postMessage).toHaveBeenCalledWith(command, [command.bitmap]);
 ```
 
-When runtime is not ready, generation mismatches, or postMessage throws, the bitmap closes and submitFrame returns false.
+Submit A, B, then C before A settles. Assert only A transfers, B closes when C replaces it, and matching FACE_EVIDENCE for A transfers C. Evidence for another generation or sequence must not release C. When runtime is not ready, generation mismatches, cancellation, disposal, worker error, or postMessage throws, every coordinator-owned bitmap closes and submitFrame returns false where applicable.
 
 - [ ] **Step 3: Implement the safe nested snapshot**
 
@@ -446,7 +441,7 @@ export interface VisionFaceSnapshot {
 }
 ```
 
-Add face to VisionSnapshot. Accept evidence only when 0 <= now() - capturedAtMs <= 150 and sequence strictly increases for the current worker generation. Reset face state on cancellation/restart/disposal. Change VisionWorkerPort.postMessage to accept an optional Transferable array.
+Add face to VisionSnapshot. Track one transferred in-flight sequence and one latest pending command. Matching current-generation FACE_EVIDENCE settles the in-flight sequence and transfers the pending command before freshness publication checks; stale evidence still settles ownership, while wrong-generation/sequence evidence does not. Accept evidence only when 0 <= now() - capturedAtMs <= 150 and sequence strictly increases for the current worker generation. Reset face state and close coordinator-owned pending bitmaps on cancellation/restart/disposal/error. Change VisionWorkerPort.postMessage to accept an optional Transferable array.
 
 - [ ] **Step 4: Write failing frame-pump tests**
 
@@ -475,7 +470,7 @@ const width = Math.max(1, Math.round(sourceWidth * scale));
 const height = Math.max(1, Math.round(sourceHeight * scale));
 ```
 
-The browser capture dependency uses createImageBitmap(video, { resizeWidth, resizeHeight, resizeQuality: "medium" }). The pump owns only capture-in-progress and sequence; every successful bitmap is immediately transferred or closed.
+The browser capture dependency uses createImageBitmap(video, { resizeWidth, resizeHeight, resizeQuality: "medium" }). The pump owns only capture-in-progress and sequence; every successful bitmap is immediately handed to the coordinator mailbox or closed.
 
 - [ ] **Step 6: Expose submitFrame from useVisionRuntime**
 

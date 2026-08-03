@@ -1,4 +1,4 @@
-Status: approved in conversation; written-spec review pending
+Status: approved in conversation; producer-side backpressure correction approved
 
 # Worker Face Evidence Design
 
@@ -71,10 +71,14 @@ runtime are ready. Every envelope contains camera generation, monotonically
 increasing sequence, monotonic capture time, delivered width and height,
 orientation, and performance tier.
 
-At most one frame is processing and one latest frame is pending. A new pending
-frame replaces and closes the previous pending bitmap. Stop, camera switch,
-generation change, or disposal closes the pending bitmap and sends cancellation
-before any new generation can submit frames.
+The main-thread coordinator owns the bounded mailbox because MediaPipe
+`detectForVideo()` is synchronous inside the worker. It transfers at most one
+in-flight frame to the worker and retains at most one latest pending bitmap. A
+new pending frame replaces and closes the previous pending bitmap. Matching
+`FACE_EVIDENCE` settles the in-flight sequence and releases the latest pending
+frame. Stop, camera switch, generation change, worker error, or disposal closes
+the pending bitmap and sends cancellation before any new generation can submit
+frames. Transferred in-flight ownership remains with the worker.
 
 ### Vision worker
 
@@ -83,10 +87,12 @@ runs `detectForVideo()` in VIDEO mode with blendshape output enabled and
 `numFaces = 2`. Ticket 04 consumes landmarks only long enough to derive face
 count and normalized bounding boxes. Blendshapes remain internal for Ticket 05.
 
-The worker closes each processed bitmap in `finally`, promotes at most the
-latest pending frame, and never queues an unbounded list. A malformed frame,
-inference exception, cancellation, or generation change produces a bounded
-safe event and releases all owned bitmaps.
+The worker processes each received frame synchronously and closes it in
+`finally`. It does not pretend to replace messages while synchronous inference
+blocks its event loop; producer-side admission guarantees that no second frame
+is transferred until the first settles. A malformed frame, inference exception,
+cancellation, or generation change produces a bounded safe event and releases
+all worker-owned bitmaps.
 
 ### Face-evidence contract
 
@@ -114,21 +120,23 @@ equivalent guidance text.
 ## Data Flow
 
 1. Camera and verified runtime both reach ready.
-2. The frame pump captures an aspect-preserving bitmap and transfers ownership
-   to the worker with its exact envelope.
-3. If inference is busy, the latest pending bitmap replaces and closes the old
-   pending bitmap.
-4. The worker runs Face Landmarker, derives normalized bounds, classifies the
+2. The frame pump captures an aspect-preserving bitmap and submits its exact
+   envelope to the coordinator.
+3. The coordinator transfers one frame to the worker. While it is in flight,
+   the latest pending bitmap replaces and closes the old pending bitmap.
+4. The worker runs Face Landmarker synchronously, derives normalized bounds, classifies the
    highest-priority guidance, discards geometry, and closes the bitmap.
-5. The coordinator validates generation, order, uniqueness, and age before
-   publishing categorical evidence.
+5. Matching categorical evidence settles the in-flight sequence, releases the
+   latest pending frame, and is then validated for generation, order,
+   uniqueness, and age before publication.
 6. UI updates guidance without blocking camera controls or animation.
 
 ## Failure and Lifecycle Rules
 
 - Runtime not ready: submit no frames and show the existing runtime recovery.
-- Camera stop/switch: increment generation, cancel inference, close pending
-  frames, clear evidence, and wait for the new generation.
+- Camera stop/switch: increment generation, close the coordinator-owned pending
+  frame, cancel worker ownership, clear evidence, and wait for the new
+  generation.
 - Stale/out-of-order/duplicate result: ignore it and increment only a bounded
   in-memory aggregate counter.
 - Worker fault: stop frame submission, close owned bitmaps, publish safe
@@ -152,8 +160,9 @@ inference results do not announce again.
 - Pure tests for normalized bounds, exact Capture Zone/size boundaries,
   priority ordering, malformed landmarks, and face-count capping.
 - Protocol tests for full envelopes and rejection of malformed messages.
-- Mailbox tests proving one running plus one latest pending frame, replacement
-  closure, processed closure, cancellation closure, and bounded memory.
+- Coordinator-mailbox tests proving one transferred in-flight plus one latest
+  pending frame, matching-evidence release, replacement closure, worker
+  processed closure, cancellation closure, and bounded memory.
 - Coordinator tests for generation, sequence, duplicate, order, and 150 ms
   freshness rejection.
 - Component/accessibility tests for all six guidance states, live-region
