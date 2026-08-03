@@ -53,15 +53,43 @@ const vision = vi.hoisted(() => ({
   },
 }));
 
+const framePump = vi.hoisted(() => ({ dispose: vi.fn(), stop: vi.fn() }));
+
 vi.mock("./vision/useVisionRuntime", () => ({
   useVisionRuntime: () => vision,
 }));
+
+vi.mock("./vision/face-frame-pump", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./vision/face-frame-pump")>();
+  return {
+    ...actual,
+    createBrowserFaceFramePump(
+      dependencies: Parameters<typeof actual.createBrowserFaceFramePump>[0],
+    ) {
+      const pump = actual.createBrowserFaceFramePump(dependencies);
+      return {
+        ...pump,
+        dispose() {
+          framePump.dispose();
+          pump.dispose();
+        },
+        stop() {
+          framePump.stop();
+          pump.stop();
+        },
+      };
+    },
+  };
+});
 
 function resetVision() {
   vision.cancel.mockReset();
   vision.prepare.mockReset().mockResolvedValue("started");
   vision.restart.mockReset().mockResolvedValue("started");
   vision.submitFrame.mockReset().mockReturnValue(true);
+  framePump.dispose.mockReset();
+  framePump.stop.mockReset();
   Object.assign(vision.snapshot, {
     face: {
       eligible: false,
@@ -173,6 +201,24 @@ async function makeCameraReady() {
   return view;
 }
 
+async function makeCameraReadyForFrames() {
+  const { stream } = makeStream();
+  installCamera(() => Promise.resolve(stream));
+  const view = render(<App />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Continue to camera" }));
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(0);
+  fireEvent.loadedData(getCameraPreview());
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(CAMERA_WARMUP_MS);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(screen.getByRole("heading", { name: "Camera ready" })).toBeVisible();
+  await act(async () => Promise.resolve());
+
+  return view;
+}
+
 describe("Smart Smile camera session", () => {
   beforeEach(() => {
     resetVision();
@@ -232,6 +278,62 @@ describe("Smart Smile camera session", () => {
     view.rerender(<App />);
     expect(status).toHaveTextContent("Smart Smile could not start safely");
   });
+
+  it("submits ready frames at a 100 ms cadence with separate runtime and camera generations", async () => {
+    vi.useFakeTimers();
+    vision.snapshot.generation = 17;
+    const createImageBitmap = vi.fn(async () => ({ close: vi.fn() }));
+    vi.stubGlobal("createImageBitmap", createImageBitmap);
+
+    await makeCameraReadyForFrames();
+
+    expect(vision.submitFrame).toHaveBeenCalledTimes(1);
+    expect(vision.submitFrame).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        generation: 17,
+        cameraGeneration: 1,
+        sequence: 0,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(99);
+    expect(vision.submitFrame).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(vision.submitFrame).toHaveBeenCalledTimes(2);
+    expect(createImageBitmap).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    "Stop camera",
+    "Switch camera",
+    "integrity stop",
+    "unmount",
+  ] as const)(
+    "disposes the frame pump when %s ends its current camera generation",
+    async (action) => {
+      vi.useFakeTimers();
+      const createImageBitmap = vi.fn(async () => ({ close: vi.fn() }));
+      vi.stubGlobal("createImageBitmap", createImageBitmap);
+      const view = await makeCameraReadyForFrames();
+      expect(createImageBitmap).toHaveBeenCalledOnce();
+
+      if (action === "Stop camera") {
+        fireEvent.click(screen.getByRole("button", { name: action }));
+      } else if (action === "Switch camera") {
+        fireEvent.click(screen.getByRole("button", { name: action }));
+      } else if (action === "integrity stop") {
+        setVisionIntegrityFailure();
+        view.rerender(<App />);
+      } else {
+        view.unmount();
+      }
+
+      await act(async () => Promise.resolve());
+      await vi.advanceTimersByTimeAsync(200);
+      expect(framePump.stop).toHaveBeenCalled();
+      expect(framePump.dispose).toHaveBeenCalled();
+      expect(createImageBitmap).toHaveBeenCalledOnce();
+    },
+  );
 
   it("keeps the privacy introduction visible and makes no request before the explicit action", () => {
     const getUserMedia = vi.fn();

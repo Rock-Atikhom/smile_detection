@@ -84,6 +84,7 @@ describe("useVisionRuntime", () => {
     const command = {
       type: "FRAME",
       generation: 0,
+      cameraGeneration: 0,
       sequence: 0,
       capturedAtMs: 0,
       width: 640,
@@ -118,6 +119,7 @@ describe("useVisionRuntime", () => {
     const command = {
       type: "FRAME",
       generation: 0,
+      cameraGeneration: 0,
       sequence: 0,
       capturedAtMs: 0,
       width: 640,

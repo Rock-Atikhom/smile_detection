@@ -41,6 +41,7 @@ export type VisionWorkerCommand =
 export type VisionFrameCommand = {
   type: "FRAME";
   generation: number;
+  cameraGeneration: number;
   sequence: number;
   capturedAtMs: number;
   width: number;
@@ -69,6 +70,7 @@ export type VisionWorkerEvent =
 export type VisionFaceEvidenceEvent = {
   type: "FACE_EVIDENCE";
   generation: number;
+  cameraGeneration: number;
   sequence: number;
   capturedAtMs: number;
   completedAtMs: number;
@@ -213,7 +215,9 @@ function isVisionBitmap(value: unknown): value is ImageBitmap {
 }
 
 function isFaceGuidance(value: unknown): value is FaceGuidance {
-  return typeof value === "string" && FACE_GUIDANCE.includes(value as FaceGuidance);
+  return (
+    typeof value === "string" && FACE_GUIDANCE.includes(value as FaceGuidance)
+  );
 }
 
 export function isVisionReleaseId(value: unknown): value is string {
@@ -322,6 +326,7 @@ export function isVisionWorkerCommand(
         isExactDataObject(value, [
           "type",
           "generation",
+          "cameraGeneration",
           "sequence",
           "capturedAtMs",
           "width",
@@ -331,6 +336,7 @@ export function isVisionWorkerCommand(
           "bitmap",
         ]) &&
         isVisionGeneration(message.generation) &&
+        isVisionGeneration(message.cameraGeneration) &&
         isVisionGeneration(message.sequence) &&
         isVisionTimestamp(message.capturedAtMs) &&
         isVisionPositiveInteger(message.width) &&
@@ -389,6 +395,7 @@ export function isVisionWorkerEvent(
         isExactDataObject(value, [
           "type",
           "generation",
+          "cameraGeneration",
           "sequence",
           "capturedAtMs",
           "completedAtMs",
@@ -401,6 +408,7 @@ export function isVisionWorkerEvent(
           "eligible",
         ]) &&
         isVisionGeneration(message.generation) &&
+        isVisionGeneration(message.cameraGeneration) &&
         isVisionGeneration(message.sequence) &&
         isVisionTimestamp(message.capturedAtMs) &&
         isVisionTimestamp(message.completedAtMs) &&

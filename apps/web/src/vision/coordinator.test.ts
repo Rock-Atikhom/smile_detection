@@ -63,10 +63,12 @@ function frame(
   sequence: number,
   generation = 0,
   image = bitmap(),
+  cameraGeneration = 0,
 ): VisionFrameCommand {
   return {
     type: "FRAME",
     generation,
+    cameraGeneration,
     sequence,
     capturedAtMs: 900 + sequence,
     width: 640,
@@ -83,6 +85,7 @@ function faceEvidence(
   return {
     type: "FACE_EVIDENCE",
     generation: 0,
+    cameraGeneration: 0,
     sequence: 0,
     capturedAtMs: 900,
     completedAtMs: 950,
@@ -315,6 +318,65 @@ describe("VisionCoordinator", () => {
     expect(worker.postMessage).toHaveBeenLastCalledWith(b, [b.bitmap]);
     expect(harness.snapshot().face.lastSequence).toBeNull();
     expect(harness.snapshot().face.staleResults).toBe(1);
+  });
+
+  it("holds a new camera generation until the old in-flight tuple settles", async () => {
+    const harness = createHarness({ now: () => 1_000 });
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockClear();
+    const oldFrame = frame(0);
+    const nextCameraFrame = frame(0, 0, bitmap(), 1);
+
+    expect(harness.coordinator.submitFrame(oldFrame)).toBe(true);
+    expect(harness.coordinator.submitFrame(nextCameraFrame)).toBe(true);
+    worker.dispatch(faceEvidence({ cameraGeneration: 0, sequence: 0 }));
+
+    expect(worker.postMessage).toHaveBeenLastCalledWith(nextCameraFrame, [
+      nextCameraFrame.bitmap,
+    ]);
+    expect(harness.snapshot().face).toMatchObject({
+      state: "detecting",
+      guidance: null,
+      lastSequence: null,
+    });
+  });
+
+  it("closes an older pending frame when a camera generation advances", async () => {
+    const harness = createHarness({ now: () => 1_000 });
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockClear();
+    const oldInFlight = frame(0);
+    const oldPending = frame(1);
+    const nextCameraFrame = frame(0, 0, bitmap(), 1);
+
+    harness.coordinator.submitFrame(oldInFlight);
+    harness.coordinator.submitFrame(oldPending);
+    harness.coordinator.submitFrame(nextCameraFrame);
+
+    expect(oldPending.bitmap.close).toHaveBeenCalledOnce();
+    worker.dispatch(faceEvidence({ cameraGeneration: 0, sequence: 0 }));
+    expect(worker.postMessage).toHaveBeenLastCalledWith(nextCameraFrame, [
+      nextCameraFrame.bitmap,
+    ]);
+  });
+
+  it("does not let a wrong camera tuple release pending ownership", async () => {
+    const harness = createHarness({ now: () => 1_000 });
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockClear();
+    const oldFrame = frame(0);
+    const nextCameraFrame = frame(0, 0, bitmap(), 1);
+
+    harness.coordinator.submitFrame(oldFrame);
+    harness.coordinator.submitFrame(nextCameraFrame);
+    worker.dispatch(faceEvidence({ cameraGeneration: 1, sequence: 0 }));
+
+    expect(worker.postMessage).toHaveBeenCalledTimes(1);
+    expect(harness.snapshot().face).toMatchObject({
+      state: "detecting",
+      guidance: null,
+      lastSequence: null,
+    });
   });
 
   it("returns rejected frame ownership before readiness and for a wrong generation", async () => {

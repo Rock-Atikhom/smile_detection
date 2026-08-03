@@ -79,6 +79,46 @@ describe("vision service worker handshake guards", () => {
 });
 
 describe("vision worker protocol guards", () => {
+  it("requires an exact non-negative camera generation on frames and evidence", () => {
+    const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
+    const frame = {
+      type: "FRAME",
+      generation: 4,
+      cameraGeneration: 9,
+      sequence: 12,
+      capturedAtMs: 1500,
+      width: 640,
+      height: 360,
+      orientation: "landscape",
+      tier: "standard",
+      bitmap,
+    };
+    const evidence = {
+      type: "FACE_EVIDENCE",
+      generation: 4,
+      cameraGeneration: 9,
+      sequence: 12,
+      capturedAtMs: 1500,
+      completedAtMs: 1540,
+      width: 640,
+      height: 360,
+      orientation: "landscape",
+      tier: "standard",
+      faceCount: 1,
+      guidance: "face-ready",
+      eligible: true,
+    };
+
+    expect(isVisionWorkerCommand(frame)).toBe(true);
+    expect(isVisionWorkerEvent(evidence)).toBe(true);
+    expect(isVisionWorkerCommand({ ...frame, cameraGeneration: -1 })).toBe(
+      false,
+    );
+    expect(isVisionWorkerEvent({ ...evidence, cameraGeneration: 1.5 })).toBe(
+      false,
+    );
+  });
+
   it("accepts the documented FRAME command and FACE_EVIDENCE event", () => {
     const bitmap = {
       close: vi.fn(),
@@ -90,6 +130,7 @@ describe("vision worker protocol guards", () => {
       isVisionWorkerCommand({
         type: "FRAME",
         generation: 4,
+        cameraGeneration: 9,
         sequence: 12,
         capturedAtMs: 1500,
         width: 640,
@@ -103,6 +144,7 @@ describe("vision worker protocol guards", () => {
       isVisionWorkerEvent({
         type: "FACE_EVIDENCE",
         generation: 4,
+        cameraGeneration: 9,
         sequence: 12,
         capturedAtMs: 1500,
         completedAtMs: 1540,

@@ -27,13 +27,19 @@ describe("face frame pump", () => {
     const pump = createFaceFramePump({ capture, now: () => 123, submit });
 
     await expect(
-      pump.tick({ generation: 3, width: 1280, height: 720 }),
+      pump.tick({
+        generation: 3,
+        cameraGeneration: 9,
+        width: 1280,
+        height: 720,
+      }),
     ).resolves.toBe(true);
 
     expect(capture).toHaveBeenCalledWith({ width: 640, height: 360 });
     expect(submit).toHaveBeenCalledWith({
       type: "FRAME",
       generation: 3,
+      cameraGeneration: 9,
       sequence: 0,
       capturedAtMs: 123,
       width: 640,
@@ -49,7 +55,12 @@ describe("face frame pump", () => {
     const submit = vi.fn(() => true);
     const pump = createFaceFramePump({ capture, now: () => 50, submit });
 
-    await pump.tick({ generation: 4, width: 360, height: 640 });
+    await pump.tick({
+      generation: 4,
+      cameraGeneration: 0,
+      width: 360,
+      height: 640,
+    });
 
     expect(capture).toHaveBeenCalledWith({ width: 360, height: 640 });
     expect(submit).toHaveBeenCalledWith(
@@ -71,7 +82,9 @@ describe("face frame pump", () => {
       const submit = vi.fn(() => true);
       const pump = createFaceFramePump({ capture, now: () => 0, submit });
 
-      await expect(pump.tick({ generation: 0, ...size })).resolves.toBe(false);
+      await expect(
+        pump.tick({ generation: 0, cameraGeneration: 0, ...size }),
+      ).resolves.toBe(false);
       expect(capture).not.toHaveBeenCalled();
       expect(submit).not.toHaveBeenCalled();
     },
@@ -83,9 +96,19 @@ describe("face frame pump", () => {
     const submit = vi.fn(() => true);
     const pump = createFaceFramePump({ capture, now: () => 0, submit });
 
-    const first = pump.tick({ generation: 0, width: 640, height: 360 });
+    const first = pump.tick({
+      generation: 0,
+      cameraGeneration: 0,
+      width: 640,
+      height: 360,
+    });
     await expect(
-      pump.tick({ generation: 0, width: 640, height: 360 }),
+      pump.tick({
+        generation: 0,
+        cameraGeneration: 0,
+        width: 640,
+        height: 360,
+      }),
     ).resolves.toBe(false);
     expect(capture).toHaveBeenCalledOnce();
 
@@ -103,7 +126,12 @@ describe("face frame pump", () => {
     });
 
     await expect(
-      pump.tick({ generation: 0, width: 640, height: 360 }),
+      pump.tick({
+        generation: 0,
+        cameraGeneration: 0,
+        width: 640,
+        height: 360,
+      }),
     ).resolves.toBe(false);
     expect(image.close).toHaveBeenCalledOnce();
   });
@@ -119,7 +147,12 @@ describe("face frame pump", () => {
     });
 
     await expect(
-      pump.tick({ generation: 0, width: 640, height: 360 }),
+      pump.tick({
+        generation: 0,
+        cameraGeneration: 0,
+        width: 640,
+        height: 360,
+      }),
     ).resolves.toBe(false);
     expect(image.close).toHaveBeenCalledOnce();
   });
@@ -135,9 +168,24 @@ describe("face frame pump", () => {
       }),
     });
 
-    await pump.tick({ generation: 3, width: 640, height: 360 });
-    await pump.tick({ generation: 3, width: 640, height: 360 });
-    await pump.tick({ generation: 4, width: 640, height: 360 });
+    await pump.tick({
+      generation: 3,
+      cameraGeneration: 0,
+      width: 640,
+      height: 360,
+    });
+    await pump.tick({
+      generation: 3,
+      cameraGeneration: 0,
+      width: 640,
+      height: 360,
+    });
+    await pump.tick({
+      generation: 4,
+      cameraGeneration: 1,
+      width: 640,
+      height: 360,
+    });
 
     expect(
       commands.map(({ generation, sequence }) => [generation, sequence]),
@@ -157,7 +205,12 @@ describe("face frame pump", () => {
       .mockResolvedValueOnce(later);
     const submit = vi.fn(() => true);
     const pump = createFaceFramePump({ capture, now: () => 0, submit });
-    const oldTick = pump.tick({ generation: 2, width: 640, height: 360 });
+    const oldTick = pump.tick({
+      generation: 2,
+      cameraGeneration: 0,
+      width: 640,
+      height: 360,
+    });
     const oldBitmap = bitmap();
 
     pump.stop();
@@ -167,7 +220,12 @@ describe("face frame pump", () => {
     expect(submit).not.toHaveBeenCalled();
 
     await expect(
-      pump.tick({ generation: 3, width: 640, height: 360 }),
+      pump.tick({
+        generation: 3,
+        cameraGeneration: 1,
+        width: 640,
+        height: 360,
+      }),
     ).resolves.toBe(true);
     expect(submit).toHaveBeenLastCalledWith(
       expect.objectContaining({ generation: 3, sequence: 0, bitmap: later }),
@@ -179,7 +237,12 @@ describe("face frame pump", () => {
     const capture = vi.fn(() => pending.promise);
     const submit = vi.fn(() => true);
     const pump = createFaceFramePump({ capture, now: () => 0, submit });
-    const oldTick = pump.tick({ generation: 2, width: 640, height: 360 });
+    const oldTick = pump.tick({
+      generation: 2,
+      cameraGeneration: 0,
+      width: 640,
+      height: 360,
+    });
     const oldBitmap = bitmap();
 
     pump.dispose();
@@ -187,7 +250,12 @@ describe("face frame pump", () => {
     await expect(oldTick).resolves.toBe(false);
     expect(oldBitmap.close).toHaveBeenCalledOnce();
     await expect(
-      pump.tick({ generation: 3, width: 640, height: 360 }),
+      pump.tick({
+        generation: 3,
+        cameraGeneration: 1,
+        width: 640,
+        height: 360,
+      }),
     ).resolves.toBe(false);
     expect(capture).toHaveBeenCalledOnce();
     expect(submit).not.toHaveBeenCalled();
@@ -204,7 +272,12 @@ describe("face frame pump", () => {
       submit: vi.fn(() => true),
     });
 
-    await pump.tick({ generation: 1, width: 1280, height: 720 });
+    await pump.tick({
+      generation: 1,
+      cameraGeneration: 0,
+      width: 1280,
+      height: 720,
+    });
 
     expect(createImageBitmap).toHaveBeenCalledWith(video, {
       resizeWidth: 640,

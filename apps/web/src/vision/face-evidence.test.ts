@@ -17,10 +17,8 @@ describe("classifyFaceLandmarks", () => {
     });
     expect(classifyFaceLandmarks([]).guidance).toBe("no-face");
     expect(
-      classifyFaceLandmarks([
-        box(0.4, 0.3, 0.6, 0.7),
-        box(0.2, 0.2, 0.4, 0.6),
-      ]).guidance,
+      classifyFaceLandmarks([box(0.4, 0.3, 0.6, 0.7), box(0.2, 0.2, 0.4, 0.6)])
+        .guidance,
     ).toBe("multiple-faces");
     expect(classifyFaceLandmarks([box(0.3, 0.05, 0.7, 0.86)]).guidance).toBe(
       "too-close",

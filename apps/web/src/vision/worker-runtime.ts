@@ -117,8 +117,7 @@ export function createVisionWorkerRuntime(
     frame: Extract<VisionWorkerCommand, { type: "FRAME" }>,
   ): void => {
     let inferenceFailure:
-      | { code: VisionReason; recoverable: boolean }
-      | undefined;
+      { code: VisionReason; recoverable: boolean } | undefined;
     try {
       const prepared = candidate.prepared;
       if (!isCurrent(candidate) || prepared === undefined) {
@@ -134,6 +133,7 @@ export function createVisionWorkerRuntime(
       postMessage({
         type: "FACE_EVIDENCE",
         generation: candidate.generation,
+        cameraGeneration: frame.cameraGeneration,
         sequence: frame.sequence,
         capturedAtMs: frame.capturedAtMs,
         completedAtMs: Date.now(),

@@ -76,6 +76,12 @@ interface ActiveWorker {
   ready: boolean;
 }
 
+interface FrameIdentity {
+  cameraGeneration: number;
+  generation: number;
+  sequence: number;
+}
+
 const IDLE_FACE_SNAPSHOT: Readonly<VisionFaceSnapshot> = Object.freeze({
   state: "idle",
   faceCount: 0,
@@ -110,7 +116,8 @@ export class VisionCoordinator {
   private cacheStartedGeneration: number | undefined;
   private activePreflight: ActivePreflight | undefined;
   private activeWorker: ActiveWorker | undefined;
-  private inFlightSequence: number | undefined;
+  private activeCameraGeneration: number | undefined;
+  private inFlightFrame: FrameIdentity | undefined;
   private pendingFrame: VisionFrameCommand | undefined;
   private disposed = false;
   private readonly listeners = new Set<(snapshot: VisionSnapshot) => void>();
@@ -205,7 +212,9 @@ export class VisionCoordinator {
       return false;
     }
 
-    if (this.inFlightSequence === undefined) {
+    if (!this.acceptCameraGeneration(command.cameraGeneration)) return false;
+
+    if (this.inFlightFrame === undefined) {
       return this.transferFrame(active, command, false);
     }
 
@@ -517,7 +526,7 @@ export class VisionCoordinator {
 
     if (value.type === "FACE_EVIDENCE") {
       if (!active.ready || this.snapshotValue.runtime !== "ready") return;
-      if (!this.settleFrame(active, value.sequence)) return;
+      if (!this.settleFrame(active, value)) return;
       this.publishFaceEvidence(value);
       return;
     }
@@ -585,9 +594,26 @@ export class VisionCoordinator {
     this.activeWorker = undefined;
   }
 
-  private settleFrame(active: ActiveWorker, sequence: number): boolean {
-    if (this.inFlightSequence !== sequence) return true;
-    this.inFlightSequence = undefined;
+  private settleFrame(
+    active: ActiveWorker,
+    value: VisionFaceEvidenceEvent,
+  ): boolean {
+    const inFlight = this.inFlightFrame;
+    if (inFlight === undefined) {
+      if (this.activeCameraGeneration === undefined) {
+        this.activeCameraGeneration = value.cameraGeneration;
+        return true;
+      }
+      return value.cameraGeneration === this.activeCameraGeneration;
+    }
+    if (
+      inFlight.generation !== value.generation ||
+      inFlight.cameraGeneration !== value.cameraGeneration ||
+      inFlight.sequence !== value.sequence
+    ) {
+      return false;
+    }
+    this.inFlightFrame = undefined;
     const pending = this.pendingFrame;
     this.pendingFrame = undefined;
     return pending === undefined || this.transferFrame(active, pending, true);
@@ -598,13 +624,21 @@ export class VisionCoordinator {
     command: VisionFrameCommand,
     coordinatorOwned: boolean,
   ): boolean {
-    this.inFlightSequence = command.sequence;
+    this.inFlightFrame = {
+      cameraGeneration: command.cameraGeneration,
+      generation: command.generation,
+      sequence: command.sequence,
+    };
     try {
       active.port.postMessage(command, [command.bitmap]);
       return true;
     } catch {
-      if (this.inFlightSequence === command.sequence) {
-        this.inFlightSequence = undefined;
+      if (
+        this.inFlightFrame?.generation === command.generation &&
+        this.inFlightFrame.cameraGeneration === command.cameraGeneration &&
+        this.inFlightFrame.sequence === command.sequence
+      ) {
+        this.inFlightFrame = undefined;
       }
       if (coordinatorOwned) this.closeBitmap(command.bitmap);
       this.closeWorker(active);
@@ -621,6 +655,7 @@ export class VisionCoordinator {
   }
 
   private publishFaceEvidence(value: VisionFaceEvidenceEvent): void {
+    if (value.cameraGeneration !== this.activeCameraGeneration) return;
     const face = this.snapshotValue.face;
     const ageMs = this.dependencies.now() - value.capturedAtMs;
     if (
@@ -662,8 +697,23 @@ export class VisionCoordinator {
   }
 
   private resetFrameAdmission(): void {
-    this.inFlightSequence = undefined;
+    this.activeCameraGeneration = undefined;
+    this.inFlightFrame = undefined;
     this.closePendingFrame();
+  }
+
+  private acceptCameraGeneration(cameraGeneration: number): boolean {
+    if (this.activeCameraGeneration === undefined) {
+      this.activeCameraGeneration = cameraGeneration;
+      return true;
+    }
+    if (cameraGeneration < this.activeCameraGeneration) return false;
+    if (cameraGeneration === this.activeCameraGeneration) return true;
+
+    this.activeCameraGeneration = cameraGeneration;
+    this.closePendingFrame();
+    this.publish({ face: { ...idleFaceSnapshot(), state: "detecting" } });
+    return true;
   }
 
   private closePendingFrame(): void {

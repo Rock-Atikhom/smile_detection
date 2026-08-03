@@ -1,6 +1,7 @@
 import type { VisionFrameCommand } from "./protocol";
 
 export interface FaceFramePumpTick {
+  cameraGeneration: number;
   generation: number;
   width: number;
   height: number;
@@ -85,6 +86,7 @@ export function createFaceFramePump(
           accepted = dependencies.submit({
             type: "FRAME",
             generation,
+            cameraGeneration: input.cameraGeneration,
             sequence,
             capturedAtMs,
             width,

@@ -59,6 +59,7 @@ function frame(
   image: ImageBitmap,
   overrides: Partial<{
     sequence: number;
+    cameraGeneration: number;
     capturedAtMs: number;
     width: number;
     height: number;
@@ -69,6 +70,7 @@ function frame(
   return {
     type: "FRAME" as const,
     generation,
+    cameraGeneration: 7,
     sequence: 1,
     capturedAtMs: 100,
     width: 640,
@@ -330,6 +332,7 @@ describe("createVisionWorkerRuntime", () => {
     expect(postMessage).toHaveBeenLastCalledWith({
       type: "FACE_EVIDENCE",
       generation: 4,
+      cameraGeneration: 7,
       sequence: 7,
       capturedAtMs: 100,
       completedAtMs: expect.any(Number),

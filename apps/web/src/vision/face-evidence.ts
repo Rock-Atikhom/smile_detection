@@ -34,7 +34,8 @@ function normalizedBounds(
   let bottom = Number.NEGATIVE_INFINITY;
 
   for (const point of points) {
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return undefined;
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y))
+      return undefined;
     left = Math.min(left, point.x);
     right = Math.max(right, point.x);
     top = Math.min(top, point.y);

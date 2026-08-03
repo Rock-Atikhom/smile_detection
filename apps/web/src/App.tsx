@@ -561,7 +561,8 @@ export default function App() {
       if (now - lastCaptureAtMs >= 100) {
         lastCaptureAtMs = now;
         void pump.tick({
-          generation: snapshot.generation,
+          generation: vision.snapshot.generation,
+          cameraGeneration: snapshot.generation,
           height,
           width,
         });
@@ -589,6 +590,7 @@ export default function App() {
     snapshot.width,
     stopFaceFramePump,
     videoRef,
+    vision.snapshot.generation,
     vision.snapshot.runtime,
     vision.submitFrame,
   ]);
