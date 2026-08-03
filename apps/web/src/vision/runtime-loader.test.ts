@@ -98,7 +98,10 @@ async function createDependencies(options?: {
         .buffer,
     );
   });
-  const createLandmarker = vi.fn(async () => ({ close: vi.fn() }));
+  const createLandmarker = vi.fn(async () => ({
+    close: vi.fn(),
+    detectForVideo: vi.fn(),
+  }));
 
   return {
     createLandmarker,
@@ -151,7 +154,30 @@ describe("prepareVisionRuntime", () => {
     expect(createLandmarker).not.toHaveBeenCalled();
   });
 
-  it("constructs exactly one CPU video Face Landmarker from verified SIMD assets", async () => {
+  it("retains video inference on the prepared runtime", async () => {
+    const { createLandmarker, dependencies } = await createDependencies();
+    const detectForVideo = vi.fn(() => ({
+      faceBlendshapes: [],
+      faceLandmarks: [],
+    }));
+    createLandmarker.mockResolvedValue({ close: vi.fn(), detectForVideo });
+    const bitmap = {} as ImageBitmap;
+
+    const prepared = await prepare(dependencies);
+    prepared.detectForVideo(bitmap, 1234);
+
+    expect(detectForVideo).toHaveBeenCalledWith(bitmap, 1234);
+    expect(createLandmarker).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        numFaces: 2,
+        outputFaceBlendshapes: true,
+        runningMode: "VIDEO",
+      }),
+    );
+  });
+
+  it("constructs a CPU video Face Landmarker from verified SIMD assets", async () => {
     const { createLandmarker, dependencies } = await createDependencies();
     const onPhase = vi.fn();
 
@@ -168,7 +194,7 @@ describe("prepareVisionRuntime", () => {
       },
       expect.objectContaining({
         baseOptions: expect.objectContaining({ delegate: "CPU" }),
-        numFaces: 1,
+        numFaces: 2,
         outputFaceBlendshapes: true,
         outputFacialTransformationMatrixes: false,
         runningMode: "VIDEO",

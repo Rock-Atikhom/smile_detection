@@ -29,7 +29,11 @@ function flushPromises(): Promise<void> {
 }
 
 function prepared(wasmTier: "simd" | "baseline" = "simd") {
-  return { close: vi.fn<() => void>(), wasmTier };
+  return {
+    close: vi.fn<() => void>(),
+    detectForVideo: vi.fn(),
+    wasmTier,
+  };
 }
 
 function deferred<T>() {

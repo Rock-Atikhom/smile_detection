@@ -26,6 +26,7 @@ type RuntimeFailureCode = Extract<
   | "offline-cache-failed"
 >;
 type WasmTier = "simd" | "baseline";
+type PreparedLandmarker = Pick<FaceLandmarker, "close" | "detectForVideo">;
 
 export interface VisionRuntimeDependencies {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
@@ -34,7 +35,7 @@ export interface VisionRuntimeDependencies {
   createLandmarker(
     fileset: WasmFileset,
     options: FaceLandmarkerOptions,
-  ): Promise<Pick<FaceLandmarker, "close">>;
+  ): Promise<PreparedLandmarker>;
 }
 
 export interface PrepareVisionRuntimeInput {
@@ -46,6 +47,10 @@ export interface PrepareVisionRuntimeInput {
 
 export interface PreparedVisionRuntime {
   wasmTier: WasmTier;
+  detectForVideo(
+    frame: ImageBitmap,
+    timestampMs: number,
+  ): ReturnType<PreparedLandmarker["detectForVideo"]>;
   close(): void;
 }
 
@@ -82,7 +87,7 @@ function throwIfCancelled(signal: AbortSignal): void {
   }
 }
 
-function closeLandmarker(landmarker: Pick<FaceLandmarker, "close">): void {
+function closeLandmarker(landmarker: PreparedLandmarker): void {
   try {
     landmarker.close();
   } catch {
@@ -236,7 +241,7 @@ async function constructTier(
   };
   const options: FaceLandmarkerOptions = {
     baseOptions: { delegate: "CPU", modelAssetBuffer },
-    numFaces: 1,
+    numFaces: 2,
     outputFaceBlendshapes: true,
     outputFacialTransformationMatrixes: false,
     runningMode: "VIDEO",
@@ -251,6 +256,9 @@ async function constructTier(
 
   let closed = false;
   return {
+    detectForVideo(frame, timestampMs) {
+      return landmarker.detectForVideo(frame, timestampMs);
+    },
     close() {
       if (!closed) {
         closed = true;
