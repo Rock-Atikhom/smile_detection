@@ -1,78 +1,151 @@
-[
-  {
-    "name": "balanced",
-    "samples": [
-      {
-        "left": 0.8,
-        "right": 0.8,
-        "rawScore": 0.8,
-        "smoothedScore": 0.28,
-        "smileValid": false
-      }
-    ]
-  },
-  {
-    "name": "asymmetric",
-    "samples": [
-      {
-        "left": 0.8,
-        "right": 0.4,
-        "rawScore": 0.48,
-        "smoothedScore": 0.168,
-        "smileValid": false
-      }
-    ]
-  },
-  {
-    "name": "neutral",
-    "samples": [
-      {
-        "left": 0,
-        "right": 0,
-        "rawScore": 0,
-        "smoothedScore": 0,
-        "smileValid": false
-      }
-    ]
-  },
-  {
-    "name": "noisy-boundary",
-    "samples": [
-      {
-        "left": 1,
-        "right": 1,
-        "rawScore": 1,
-        "smoothedScore": 0.35,
-        "smileValid": false
-      },
-      {
-        "left": 1,
-        "right": 1,
-        "rawScore": 1,
-        "smoothedScore": 0.5775,
-        "smileValid": false
-      },
-      {
-        "left": 1,
-        "right": 1,
-        "rawScore": 1,
-        "smoothedScore": 0.725375,
-        "smileValid": true
-      },
-      {
-        "left": 0,
-        "right": 0,
-        "rawScore": 0,
-        "smoothedScore": 0.47149375,
-        "smileValid": true
-      },
-      {
-        "left": 0,
-        "right": 0,
-        "rawScore": 0,
-        "smoothedScore": 0.3064709375,
-        "smileValid": false
-      }
-    ]
-  }
-]
+{
+  "source": ".scratch/smart-smile-mvp/prototypes/smile_score_calibration_prototype.py",
+  "traces": [
+    {
+      "name": "balanced ramp",
+      "samples": [
+        {
+          "left": 0.1,
+          "right": 0.1,
+          "rawScore": 0.1,
+          "smoothedScore": 0.035,
+          "smileValid": false
+        },
+        {
+          "left": 0.25,
+          "right": 0.25,
+          "rawScore": 0.25,
+          "smoothedScore": 0.11025,
+          "smileValid": false
+        },
+        {
+          "left": 0.4,
+          "right": 0.4,
+          "rawScore": 0.4,
+          "smoothedScore": 0.2116625,
+          "smileValid": false
+        },
+        {
+          "left": 0.55,
+          "right": 0.55,
+          "rawScore": 0.55,
+          "smoothedScore": 0.330080625,
+          "smileValid": false
+        },
+        {
+          "left": 0.7,
+          "right": 0.7,
+          "rawScore": 0.7,
+          "smoothedScore": 0.45955240625,
+          "smileValid": false
+        },
+        {
+          "left": 0.82,
+          "right": 0.82,
+          "rawScore": 0.82,
+          "smoothedScore": 0.5857090640625,
+          "smileValid": false
+        }
+      ]
+    },
+    {
+      "name": "asymmetric smile",
+      "samples": [
+        {
+          "left": 0.78,
+          "right": 0.38,
+          "rawScore": 0.46,
+          "smoothedScore": 0.161,
+          "smileValid": false
+        },
+        {
+          "left": 0.8,
+          "right": 0.42,
+          "rawScore": 0.496,
+          "smoothedScore": 0.27825,
+          "smileValid": false
+        },
+        {
+          "left": 0.82,
+          "right": 0.5,
+          "rawScore": 0.564,
+          "smoothedScore": 0.3782625,
+          "smileValid": false
+        },
+        {
+          "left": 0.82,
+          "right": 0.62,
+          "rawScore": 0.66,
+          "smoothedScore": 0.476870625,
+          "smileValid": false
+        }
+      ]
+    },
+    {
+      "name": "noisy boundary",
+      "samples": [
+        {
+          "left": 0.56,
+          "right": 0.56,
+          "rawScore": 0.56,
+          "smoothedScore": 0.196,
+          "smileValid": false
+        },
+        {
+          "left": 0.63,
+          "right": 0.61,
+          "rawScore": 0.614,
+          "smoothedScore": 0.3423,
+          "smileValid": false
+        },
+        {
+          "left": 0.57,
+          "right": 0.59,
+          "rawScore": 0.574,
+          "smoothedScore": 0.423395,
+          "smileValid": false
+        },
+        {
+          "left": 0.62,
+          "right": 0.64,
+          "rawScore": 0.624,
+          "smoothedScore": 0.49360675,
+          "smileValid": false
+        },
+        {
+          "left": 0.43,
+          "right": 0.44,
+          "rawScore": 0.432,
+          "smoothedScore": 0.4720443875,
+          "smileValid": false
+        }
+      ]
+    },
+    {
+      "name": "neutral",
+      "samples": [
+        {
+          "left": 0.08,
+          "right": 0.1,
+          "rawScore": 0.084,
+          "smoothedScore": 0.0294,
+          "smileValid": false
+        },
+        {
+          "left": 0.14,
+          "right": 0.12,
+          "rawScore": 0.124,
+          "smoothedScore": 0.06251,
+          "smileValid": false
+        },
+        {
+          "left": 0.18,
+          "right": 0.16,
+          "rawScore": 0.164,
+          "smoothedScore": 0.0980315,
+          "smileValid": false
+        }
+      ]
+    }
+  ]
+}

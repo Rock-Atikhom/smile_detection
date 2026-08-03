@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import referenceTraces from "./fixtures/smile-reference.json";
+import rawReferenceFixture from "./fixtures/smile-reference.json";
 import {
   DEFAULT_SMILE_PROFILE,
   calculateRawSmileScore,
@@ -12,6 +12,22 @@ const categories = (left: number, right: number) => [
   { categoryName: "mouthSmileLeft", score: left },
   { categoryName: "mouthSmileRight", score: right },
 ];
+
+interface ReferenceTrace {
+  name: string;
+  samples: {
+    left: number;
+    right: number;
+    rawScore: number;
+    smoothedScore: number;
+    smileValid: boolean;
+  }[];
+}
+
+const referenceFixture = rawReferenceFixture as unknown as {
+  source?: string;
+  traces?: ReferenceTrace[];
+};
 
 describe("calculateRawSmileScore", () => {
   it("calculates the literal bilateral smile formula", () => {
@@ -91,6 +107,57 @@ describe("validateSmileProfile", () => {
 });
 
 describe("updateSmileFilter", () => {
+  it("pins every input from the approved desktop prototype traces", () => {
+    expect(referenceFixture.source).toBe(
+      ".scratch/smart-smile-mvp/prototypes/smile_score_calibration_prototype.py",
+    );
+    expect(
+      referenceFixture.traces?.map((trace) => ({
+        name: trace.name,
+        inputs: trace.samples.map(({ left, right }) => [left, right]),
+      })),
+    ).toEqual([
+      {
+        name: "balanced ramp",
+        inputs: [
+          [0.1, 0.1],
+          [0.25, 0.25],
+          [0.4, 0.4],
+          [0.55, 0.55],
+          [0.7, 0.7],
+          [0.82, 0.82],
+        ],
+      },
+      {
+        name: "asymmetric smile",
+        inputs: [
+          [0.78, 0.38],
+          [0.8, 0.42],
+          [0.82, 0.5],
+          [0.82, 0.62],
+        ],
+      },
+      {
+        name: "noisy boundary",
+        inputs: [
+          [0.56, 0.56],
+          [0.63, 0.61],
+          [0.57, 0.59],
+          [0.62, 0.64],
+          [0.43, 0.44],
+        ],
+      },
+      {
+        name: "neutral",
+        inputs: [
+          [0.08, 0.1],
+          [0.14, 0.12],
+          [0.18, 0.16],
+        ],
+      },
+    ]);
+  });
+
   it("smooths valid scores and applies hysteresis", () => {
     let state = createSmileFilterState();
     state = updateSmileFilter(state, 1);
@@ -115,17 +182,20 @@ describe("updateSmileFilter", () => {
     });
   });
 
-  it.each(referenceTraces)("matches the $name reference trace", (trace) => {
-    let state = createSmileFilterState();
+  it.each(referenceFixture.traces ?? [])(
+    "matches the $name reference trace",
+    (trace) => {
+      let state = createSmileFilterState();
 
-    for (const sample of trace.samples) {
-      const rawScore = calculateRawSmileScore(
-        categories(sample.left, sample.right),
-      );
-      expect(rawScore).toBeCloseTo(sample.rawScore, 12);
-      state = updateSmileFilter(state, rawScore);
-      expect(state.smoothedScore).toBeCloseTo(sample.smoothedScore, 12);
-      expect(state.smileValid).toBe(sample.smileValid);
-    }
-  });
+      for (const sample of trace.samples) {
+        const rawScore = calculateRawSmileScore(
+          categories(sample.left, sample.right),
+        );
+        expect(rawScore).toBeCloseTo(sample.rawScore, 12);
+        state = updateSmileFilter(state, rawScore);
+        expect(state.smoothedScore).toBeCloseTo(sample.smoothedScore, 12);
+        expect(state.smileValid).toBe(sample.smileValid);
+      }
+    },
+  );
 });
