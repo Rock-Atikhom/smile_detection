@@ -6,7 +6,6 @@ import {
 } from "./runtime-loader";
 import {
   isVisionWorkerCommand,
-  type VisionFrameCommand,
   type VisionReason,
   type VisionWorkerCommand,
   type VisionWorkerEvent,
@@ -17,8 +16,6 @@ interface ActiveGeneration {
   controller: AbortController;
   generation: number;
   prepared?: PreparedVisionRuntime;
-  processing: boolean;
-  pending?: VisionFrameCommand;
 }
 
 export interface VisionWorkerRuntime {
@@ -28,10 +25,6 @@ export interface VisionWorkerRuntime {
 
 function closeGeneration(active: ActiveGeneration): void {
   active.controller.abort();
-  if (active.pending !== undefined) {
-    closeBitmap(active.pending.bitmap);
-    active.pending = undefined;
-  }
   active.prepared?.close();
   active.prepared = undefined;
 }
@@ -44,36 +37,56 @@ function closeBitmap(bitmap: ImageBitmap): void {
   }
 }
 
-function closeMalformedFrameBitmap(message: unknown): void {
+function ownDataProperty(value: unknown, key: PropertyKey): unknown {
   if (
-    typeof message !== "object" ||
-    message === null ||
-    Array.isArray(message) ||
-    Object.getPrototypeOf(message) !== Object.prototype
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null
+  ) {
+    return undefined;
+  }
+
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && "value" in descriptor
+      ? descriptor.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function closeCloseable(value: unknown): void {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null
   ) {
     return;
   }
 
-  const candidate = message as {
-    bitmap?: { close?: unknown };
-    type?: unknown;
-  };
-  if (
-    candidate.type === "FRAME" &&
-    typeof candidate.bitmap?.close === "function"
-  ) {
-    closeBitmap(candidate.bitmap as ImageBitmap);
+  const visited = new Set<object>();
+  let owner: object | null = value;
+  while (owner !== null && !visited.has(owner)) {
+    visited.add(owner);
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(owner, "close");
+      if (descriptor !== undefined) {
+        if ("value" in descriptor && typeof descriptor.value === "function") {
+          Reflect.apply(descriptor.value, value, []);
+        }
+        return;
+      }
+      owner = Object.getPrototypeOf(owner) as object | null;
+    } catch {
+      return;
+    }
   }
 }
 
-function replacePending(
-  active: ActiveGeneration,
-  frame: VisionFrameCommand,
-): void {
-  if (active.pending !== undefined) {
-    closeBitmap(active.pending.bitmap);
+function closeMalformedFrameBitmap(message: unknown): void {
+  if (ownDataProperty(message, "type") !== "FRAME") {
+    return;
   }
-  active.pending = frame;
+  closeCloseable(ownDataProperty(message, "bitmap"));
 }
 
 function mapFailure(error: unknown): {
@@ -99,20 +112,17 @@ export function createVisionWorkerRuntime(
   const isCurrent = (candidate: ActiveGeneration): boolean =>
     !disposed && active === candidate && !candidate.controller.signal.aborted;
 
-  const processFrame = async (
+  const processFrame = (
     candidate: ActiveGeneration,
-    frame: VisionFrameCommand,
-  ): Promise<void> => {
+    frame: Extract<VisionWorkerCommand, { type: "FRAME" }>,
+  ): void => {
     try {
       const prepared = candidate.prepared;
       if (!isCurrent(candidate) || prepared === undefined) {
         return;
       }
 
-      const result = await prepared.detectForVideo(
-        frame.bitmap,
-        frame.capturedAtMs,
-      );
+      const result = prepared.detectForVideo(frame.bitmap, frame.capturedAtMs);
       if (!isCurrent(candidate)) {
         return;
       }
@@ -134,18 +144,6 @@ export function createVisionWorkerRuntime(
       // Inference failures remain inside the worker boundary.
     } finally {
       closeBitmap(frame.bitmap);
-      candidate.processing = false;
-      const pending = candidate.pending;
-      candidate.pending = undefined;
-
-      if (pending !== undefined) {
-        if (!isCurrent(candidate) || candidate.prepared === undefined) {
-          closeBitmap(pending.bitmap);
-        } else {
-          candidate.processing = true;
-          void processFrame(candidate, pending);
-        }
-      }
     }
   };
 
@@ -235,13 +233,7 @@ export function createVisionWorkerRuntime(
           return;
         }
 
-        if (active.processing) {
-          replacePending(active, message);
-          return;
-        }
-
-        active.processing = true;
-        void processFrame(active, message);
+        processFrame(active, message);
         return;
       }
 
@@ -261,7 +253,6 @@ export function createVisionWorkerRuntime(
       const candidate: ActiveGeneration = {
         controller: new AbortController(),
         generation: message.generation,
-        processing: false,
       };
       active = candidate;
       void prepare(message, candidate);

@@ -313,33 +313,24 @@ describe("createVisionWorkerRuntime", () => {
     expect(discardedImage.close).toHaveBeenCalledOnce();
   });
 
-  it("keeps only the latest pending frame while inference is running", async () => {
-    const inference = deferred<unknown>();
+  it("settles an accepted frame synchronously with categorical evidence and cleanup", async () => {
     const instance = prepared();
-    instance.detectForVideo.mockReturnValueOnce(inference.promise);
+    instance.detectForVideo.mockReturnValueOnce({
+      faceLandmarks: [eligibleFace],
+      faceBlendshapes: [],
+    });
     const { postMessage, runtime } = readyRuntime(instance);
-    const imageA = bitmap();
-    const imageB = bitmap();
-    const imageC = bitmap();
+    const image = bitmap();
 
     await flushPromises();
-    runtime.receive(frame(4, imageA, { sequence: 1 }));
-    runtime.receive(frame(4, imageB, { sequence: 2 }));
-    runtime.receive(frame(4, imageC, { sequence: 3 }));
+    runtime.receive(frame(4, image, { sequence: 7 }));
 
-    expect(imageB.close).toHaveBeenCalledOnce();
-    inference.resolve({ faceLandmarks: [eligibleFace], faceBlendshapes: [] });
-
-    await vi.waitFor(() => expect(imageA.close).toHaveBeenCalledOnce());
-    expect(instance.detectForVideo).toHaveBeenLastCalledWith(
-      imageC,
-      expect.any(Number),
-    );
-    await vi.waitFor(() => expect(imageC.close).toHaveBeenCalledOnce());
-    expect(postMessage).toHaveBeenCalledWith({
+    expect(instance.detectForVideo).toHaveBeenCalledWith(image, 100);
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(postMessage).toHaveBeenLastCalledWith({
       type: "FACE_EVIDENCE",
       generation: 4,
-      sequence: 1,
+      sequence: 7,
       capturedAtMs: 100,
       completedAtMs: expect.any(Number),
       width: 640,
@@ -377,43 +368,33 @@ describe("createVisionWorkerRuntime", () => {
     expect(instance.detectForVideo).not.toHaveBeenCalled();
   });
 
-  it("closes pending and active frames when the generation is cancelled", async () => {
-    const inference = deferred<unknown>();
+  it("closes a frame received after the generation is cancelled", async () => {
     const instance = prepared();
-    instance.detectForVideo.mockReturnValueOnce(inference.promise);
     const { postMessage, runtime } = readyRuntime(instance);
-    const activeImage = bitmap();
-    const pendingImage = bitmap();
+    const image = bitmap();
 
     await flushPromises();
-    runtime.receive(frame(4, activeImage));
-    runtime.receive(frame(4, pendingImage, { sequence: 2 }));
     runtime.receive({ type: "CANCEL", generation: 4 });
-    inference.resolve({ faceLandmarks: [eligibleFace], faceBlendshapes: [] });
+    runtime.receive(frame(4, image));
 
-    expect(pendingImage.close).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(activeImage.close).toHaveBeenCalledOnce());
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(instance.detectForVideo).not.toHaveBeenCalled();
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "FACE_EVIDENCE" }),
     );
   });
 
-  it("closes pending and active frames when disposed", async () => {
-    const inference = deferred<unknown>();
+  it("closes a frame received after disposal", async () => {
     const instance = prepared();
-    instance.detectForVideo.mockReturnValueOnce(inference.promise);
     const { postMessage, runtime } = readyRuntime(instance);
-    const activeImage = bitmap();
-    const pendingImage = bitmap();
+    const image = bitmap();
 
     await flushPromises();
-    runtime.receive(frame(4, activeImage));
-    runtime.receive(frame(4, pendingImage, { sequence: 2 }));
     runtime.dispose();
-    inference.resolve({ faceLandmarks: [eligibleFace], faceBlendshapes: [] });
+    runtime.receive(frame(4, image));
 
-    expect(pendingImage.close).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(activeImage.close).toHaveBeenCalledOnce());
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(instance.detectForVideo).not.toHaveBeenCalled();
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "FACE_EVIDENCE" }),
     );
@@ -430,16 +411,17 @@ describe("createVisionWorkerRuntime", () => {
     await flushPromises();
     runtime.receive(frame(4, image));
 
-    await vi.waitFor(() => expect(image.close).toHaveBeenCalledOnce());
+    expect(image.close).toHaveBeenCalledOnce();
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "FACE_EVIDENCE" }),
     );
   });
 
-  it("ignores malformed input without posting evidence", () => {
+  it("closes a bitmap on malformed plain FRAME-like input", async () => {
     const { instance, postMessage, runtime } = readyRuntime();
     const image = bitmap();
 
+    await flushPromises();
     runtime.receive({ ...frame(4, image), unexpected: true });
 
     expect(image.close).toHaveBeenCalledOnce();
@@ -447,5 +429,31 @@ describe("createVisionWorkerRuntime", () => {
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "FACE_EVIDENCE" }),
     );
+  });
+
+  it("closes a bitmap on malformed non-plain FRAME-like input", async () => {
+    const { instance, postMessage, runtime } = readyRuntime();
+    const image = bitmap();
+    const envelope = Object.assign([], frame(4, image));
+
+    await flushPromises();
+    runtime.receive(envelope);
+
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(instance.detectForVideo).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+  });
+
+  it("does not invoke accessors while probing rejected FRAME-like input", () => {
+    const runtime = createVisionWorkerRuntime(unusedDependencies, vi.fn());
+    const bitmapGetter = vi.fn();
+    const envelope = { type: "FRAME" };
+    Object.defineProperty(envelope, "bitmap", { get: bitmapGetter });
+
+    runtime.receive(envelope);
+
+    expect(bitmapGetter).not.toHaveBeenCalled();
   });
 });
