@@ -1,0 +1,78 @@
+[
+  {
+    "name": "balanced",
+    "samples": [
+      {
+        "left": 0.8,
+        "right": 0.8,
+        "rawScore": 0.8,
+        "smoothedScore": 0.28,
+        "smileValid": false
+      }
+    ]
+  },
+  {
+    "name": "asymmetric",
+    "samples": [
+      {
+        "left": 0.8,
+        "right": 0.4,
+        "rawScore": 0.52,
+        "smoothedScore": 0.182,
+        "smileValid": false
+      }
+    ]
+  },
+  {
+    "name": "neutral",
+    "samples": [
+      {
+        "left": 0,
+        "right": 0,
+        "rawScore": 0,
+        "smoothedScore": 0,
+        "smileValid": false
+      }
+    ]
+  },
+  {
+    "name": "noisy-boundary",
+    "samples": [
+      {
+        "left": 1,
+        "right": 1,
+        "rawScore": 1,
+        "smoothedScore": 0.35,
+        "smileValid": false
+      },
+      {
+        "left": 1,
+        "right": 1,
+        "rawScore": 1,
+        "smoothedScore": 0.5775,
+        "smileValid": false
+      },
+      {
+        "left": 1,
+        "right": 1,
+        "rawScore": 1,
+        "smoothedScore": 0.725375,
+        "smileValid": true
+      },
+      {
+        "left": 0,
+        "right": 0,
+        "rawScore": 0,
+        "smoothedScore": 0.47149375,
+        "smileValid": true
+      },
+      {
+        "left": 0,
+        "right": 0,
+        "rawScore": 0,
+        "smoothedScore": 0.3064709375,
+        "smileValid": false
+      }
+    ]
+  }
+]
