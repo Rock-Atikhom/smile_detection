@@ -55,7 +55,7 @@
 
 ```ts
 expect(calculateRawSmileScore(categories(0.8, 0.8))).toBeCloseTo(0.8, 12);
-expect(calculateRawSmileScore(categories(0.8, 0.4))).toBeCloseTo(0.52, 12);
+expect(calculateRawSmileScore(categories(0.8, 0.4))).toBeCloseTo(0.48, 12);
 expect(calculateRawSmileScore([])).toBe(0);
 expect(calculateRawSmileScore([{ categoryName: "mouthSmileLeft", score: NaN }])).toBe(0);
 expect(calculateRawSmileScore(categories(1.01, 0.8))).toBe(0);
@@ -368,7 +368,7 @@ detectForVideo.mockReturnValueOnce({
 });
 ```
 
-Assert the posted event contains `rawSmileScore: 0.52` and one normalized observation, but JSON text contains none of `faceLandmarks`, `faceBlendshapes`, `categoryName`, `mouthSmileLeft`, or `mouthSmileRight`. Test no face, multiple faces, missing classification, invalid coefficient, generation rejection, inference failure, cancellation, and bitmap closure.
+Assert the posted event contains `rawSmileScore: 0.48` and one normalized observation, but JSON text contains none of `faceLandmarks`, `faceBlendshapes`, `categoryName`, `mouthSmileLeft`, or `mouthSmileRight`. Test no face, multiple faces, missing classification, invalid coefficient, generation rejection, inference failure, cancellation, and bitmap closure.
 
 - [ ] **Step 4: Implement worker reduction and run GREEN**
 
