@@ -6,12 +6,14 @@ import {
   type VisionSnapshot,
   type VisionStartResult,
 } from "./coordinator";
+import type { VisionFrameCommand } from "./protocol";
 
 export interface UseVisionRuntimeResult {
   snapshot: VisionSnapshot;
   prepare(): Promise<VisionStartResult>;
   restart(): Promise<VisionStartResult>;
   cancel(): void;
+  submitFrame(command: VisionFrameCommand): boolean;
 }
 
 export function useVisionRuntime(): UseVisionRuntimeResult {
@@ -46,6 +48,16 @@ export function useVisionRuntime(): UseVisionRuntimeResult {
     [],
   );
   const cancel = useCallback(() => coordinatorRef.current?.cancel(), []);
+  const submitFrame = useCallback((command: VisionFrameCommand) => {
+    const coordinator = coordinatorRef.current;
+    if (coordinator !== null) return coordinator.submitFrame(command);
+    try {
+      command.bitmap.close();
+    } catch {
+      // The hook retains no transferable data when its coordinator is absent.
+    }
+    return false;
+  }, []);
 
-  return { cancel, prepare, restart, snapshot };
+  return { cancel, prepare, restart, snapshot, submitFrame };
 }
