@@ -71,3 +71,33 @@ manifest deletes the whole release cache and enters fatal integrity recovery.
 If Cache Storage cannot commit a first release, setup fails closed before worker
 creation or camera permission and offers a bounded retry instead of running from
 unverifiable URL refetches.
+
+## Ticket 04 worker face-evidence boundary
+
+Ticket 04 sends an aspect-preserving `ImageBitmap` frame directly from the
+main-thread frame pump to the already prepared dedicated worker. The coordinator
+admits one running frame plus one latest pending frame, closes replaced and
+processed bitmaps, and binds every frame and result to distinct runtime
+`generation` and camera `cameraGeneration` values, sequence, capture time,
+dimensions, orientation, and the standard inference tier. It rejects stale,
+duplicate, out-of-order, and wrong-generation or wrong-camera-generation
+results before React can observe them.
+
+The worker alone runs Face Landmarker VIDEO inference and immediately reduces
+its result to categorical evidence: a capped face count, one of no face,
+multiple faces, move back, move closer, center your face, or face ready, and
+an eligibility boolean. React receives only that participant-safe categorical
+snapshot through the coordinator; it never receives a frame, MediaPipe object,
+landmarks, blendshapes, boxes, geometry, coordinates, or a smile score. The
+application uses no participant dataset and does no custom model training.
+Smile Score remains Ticket 05 work.
+
+The browser coordinator has one optional Worker factory read only at worker
+construction. Production uses the bundled worker. Playwright installs the
+factory before navigation to supply deterministic protocol events with exact
+current runtime and camera tuples; it exposes no participant data and provides
+no UI control in the application.
+
+Ticket 04 does not remove the Ticket 03 first-load browser race: it remains a
+release blocker. A completed-cache close/reopen is valid only for development
+demonstration and manual testing preparation until Ticket 03 is resolved.

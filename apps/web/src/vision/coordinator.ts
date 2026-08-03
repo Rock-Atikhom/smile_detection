@@ -760,6 +760,19 @@ function deferredCacheClient(
 const NETWORK_PROBE_PARAMETER = "__vision_network_probe";
 let networkProbeSequence = 0;
 
+type BrowserVisionWorkerFactory = () => VisionWorkerPort;
+
+function createBrowserVisionWorker(): VisionWorkerPort {
+  const factory = (
+    globalThis as typeof globalThis & {
+      __smartSmileCreateVisionWorker?: unknown;
+    }
+  ).__smartSmileCreateVisionWorker;
+  return typeof factory === "function"
+    ? (factory as BrowserVisionWorkerFactory)()
+    : new Worker(new URL("./worker.ts", import.meta.url));
+}
+
 function createNetworkProbeUrl(manifestUrl: string): URL | undefined {
   const url = new URL(manifestUrl, window.location.href);
   if (url.origin !== window.location.origin) return undefined;
@@ -798,7 +811,7 @@ export function createBrowserVisionCoordinator(
         return false;
       }
     },
-    createWorker: () => new Worker(new URL("./worker.ts", import.meta.url)),
+    createWorker: createBrowserVisionWorker,
     manifest: VISION_MANIFEST,
     manifestUrl: VISION_MANIFEST_URL,
     now: () => performance.now(),
