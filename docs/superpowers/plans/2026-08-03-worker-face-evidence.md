@@ -16,7 +16,7 @@
 - Visible Capture Zone: x = 0.20..0.80 and y = 0.12..0.82. Initial eligible center: x = 0.23..0.77 and y = 0.16..0.78.
 - Eligible bounds stay inside the frame, width is at least 0.18, and height is 0.30..0.80 inclusive.
 - Guidance priority: no-face, multiple-faces, too-close, too-far, off-center, face-ready.
-- Carry generation, sequence, monotonic capture timestamp, dimensions, orientation, and tier on every frame and evidence message.
+- Carry vision-runtime `generation`, distinct `cameraGeneration`, sequence, monotonic capture timestamp, dimensions, orientation, and tier on every frame and evidence message. Reject evidence stale against either counter.
 - Reject old-generation, duplicate, out-of-order, malformed, and older-than-150-ms results.
 - Keep at most one transferred in-flight frame and one latest pending ImageBitmap end to end. The coordinator closes replaced/cancelled pending bitmaps; the worker closes processed/rejected/failed transferred bitmaps exactly once.
 - Landmark arrays, blendshapes, boxes, coordinates, matrices, frames, object URLs, and identifiers never enter React state, persistence, diagnostics export, service-worker cache, or network traffic.
@@ -176,6 +176,7 @@ expect(
   isVisionWorkerCommand({
     type: "FRAME",
     generation: 4,
+    cameraGeneration: 9,
     sequence: 12,
     capturedAtMs: 1500,
     width: 640,
@@ -190,6 +191,7 @@ expect(
   isVisionWorkerEvent({
     type: "FACE_EVIDENCE",
     generation: 4,
+    cameraGeneration: 9,
     sequence: 12,
     capturedAtMs: 1500,
     completedAtMs: 1540,
@@ -204,7 +206,7 @@ expect(
 ).toBe(true);
 ```
 
-Add rejected fixtures for fractional sequence, non-finite time, zero dimensions, invalid orientation/tier, faceCount 3, eligible/guidance mismatch, missing bitmap close, and extra keys.
+Add rejected fixtures for fractional runtime/camera generation or sequence, non-finite time, zero dimensions, invalid orientation/tier, faceCount 3, eligible/guidance mismatch, missing bitmap close, and extra keys.
 
 - [ ] **Step 2: Verify RED**
 
@@ -221,6 +223,7 @@ export type VisionInferenceTier = "standard";
 export type VisionFrameCommand = {
   type: "FRAME";
   generation: number;
+  cameraGeneration: number;
   sequence: number;
   capturedAtMs: number;
   width: number;
@@ -233,6 +236,7 @@ export type VisionFrameCommand = {
 export type VisionFaceEvidenceEvent = {
   type: "FACE_EVIDENCE";
   generation: number;
+  cameraGeneration: number;
   sequence: number;
   capturedAtMs: number;
   completedAtMs: number;
@@ -246,7 +250,7 @@ export type VisionFaceEvidenceEvent = {
 };
 ```
 
-Require exact own-key sets, safe integers, finite non-negative timestamps, and eligible === (guidance === "face-ready").
+Require exact own-key sets, non-negative safe runtime/camera generations and sequence, finite non-negative timestamps, and eligible === (guidance === "face-ready").
 
 - [ ] **Step 4: Run GREEN and commit**
 
@@ -426,7 +430,7 @@ expect(coordinator.submitFrame(command)).toBe(true);
 expect(worker.postMessage).toHaveBeenCalledWith(command, [command.bitmap]);
 ```
 
-Submit A, B, then C before A settles. Assert only A transfers, B closes when C replaces it, and matching FACE_EVIDENCE for A transfers C. Evidence for another generation or sequence must not release C. When runtime is not ready, generation mismatches, cancellation, disposal, worker error, or postMessage throws, every coordinator-owned bitmap closes and submitFrame returns false where applicable.
+Submit A, B, then C before A settles. Assert only A transfers, B closes when C replaces it, and matching FACE_EVIDENCE for A transfers C. Evidence for another runtime generation, camera generation, or sequence must not release C. A new camera generation replaces pending ownership, resets publication ordering, and lets the old in-flight result settle without publication before the new frame transfers. When runtime is not ready, generation mismatches, cancellation, disposal, worker error, or postMessage throws, every coordinator-owned bitmap closes and submitFrame returns false where applicable.
 
 - [ ] **Step 3: Implement the safe nested snapshot**
 
@@ -441,7 +445,7 @@ export interface VisionFaceSnapshot {
 }
 ```
 
-Add face to VisionSnapshot. Track one transferred in-flight sequence and one latest pending command. Matching current-generation FACE_EVIDENCE settles the in-flight sequence and transfers the pending command before freshness publication checks; stale evidence still settles ownership, while wrong-generation/sequence evidence does not. Accept evidence only when 0 <= now() - capturedAtMs <= 150 and sequence strictly increases for the current worker generation. Reset face state and close coordinator-owned pending bitmaps on cancellation/restart/disposal/error. Change VisionWorkerPort.postMessage to accept an optional Transferable array.
+Add face to VisionSnapshot. Track one transferred in-flight tuple `(generation, cameraGeneration, sequence)` and one latest pending command. Matching current-runtime/current-camera FACE_EVIDENCE settles the in-flight tuple and transfers the pending command before freshness publication checks; stale evidence still settles ownership, while a wrong tuple does not. When camera generation advances, reset publication ordering immediately, retain only the latest new-camera pending frame, and suppress old-camera publication while allowing its in-flight tuple to settle. Accept evidence only when 0 <= now() - capturedAtMs <= 150 and sequence strictly increases for the current runtime and camera generation. Reset face state and close coordinator-owned pending bitmaps on cancellation/restart/disposal/error. Change VisionWorkerPort.postMessage to accept an optional Transferable array.
 
 - [ ] **Step 4: Write failing frame-pump tests**
 
@@ -527,7 +531,7 @@ Expected: camera-ready copy ignores face guidance.
 
 - [ ] **Step 3: Start the pump only for ready camera/runtime**
 
-Schedule at most one tick per 100 ms, keyed by camera generation. Cleanup cancels the scheduler and disposes the pump before switch, stop, or unmount.
+Schedule at most one tick per 100 ms. Every submitted frame carries `visionSnapshot.generation` as runtime `generation` and the camera snapshot counter as `cameraGeneration`; never substitute one for the other. Cleanup cancels the scheduler and disposes the pump before switch, stop, or unmount. Add integration tests that exercise pump creation, 100 ms cadence, both counters, and disposal on Stop, Switch, integrity stop, and unmount rather than injecting face evidence alone.
 
 - [ ] **Step 4: Render the literal copy table**
 

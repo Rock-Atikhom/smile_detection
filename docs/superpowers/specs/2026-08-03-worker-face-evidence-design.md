@@ -1,4 +1,4 @@
-Status: approved in conversation; producer-side backpressure correction approved
+Status: approved in conversation; producer backpressure and two-generation corrections approved
 
 # Worker Face Evidence Design
 
@@ -67,9 +67,12 @@ The participant sees friendly text derived from that enum: **Show your face**,
 
 The camera integration owns frame capture but not inference state. It creates
 an aspect-preserving inference `ImageBitmap` only while the camera and verified
-runtime are ready. Every envelope contains camera generation, monotonically
-increasing sequence, monotonic capture time, delivered width and height,
-orientation, and performance tier.
+runtime are ready. Every envelope contains the vision-runtime generation,
+camera generation, monotonically increasing sequence, monotonic capture time,
+delivered width and height, orientation, and performance tier. These counters
+are distinct: runtime restart invalidates model ownership, while camera
+generation invalidates frames from Stop, Switch, or reacquisition without
+reloading the model.
 
 The main-thread coordinator owns the bounded mailbox because MediaPipe
 `detectForVideo()` is synchronous inside the worker. It transfers at most one
@@ -98,7 +101,8 @@ all worker-owned bitmaps.
 
 Worker results contain only:
 
-- generation, sequence, capture time, and processing completion time;
+- runtime generation, camera generation, sequence, capture time, and processing
+  completion time;
 - delivered frame dimensions and orientation;
 - capped face count (`0 | 1 | 2`);
 - categorical guidance and eligibility;
@@ -111,8 +115,8 @@ ephemeral inside the worker and is discarded after classification.
 ### React integration
 
 One face-evidence coordinator validates every event before publishing a
-semantic snapshot. It rejects mismatched generations, duplicate or decreasing
-sequences, and results older than 150 ms at receipt. React renders only the
+semantic snapshot. It rejects mismatched runtime or camera generations,
+duplicate or decreasing sequences, and results older than 150 ms at receipt. React renders only the
 current guidance and safe aggregate status. The video and any decorative
 Capture Zone overlay remain `aria-hidden`; an atomic polite status exposes the
 equivalent guidance text.
