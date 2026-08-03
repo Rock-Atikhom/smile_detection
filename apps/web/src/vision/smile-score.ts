@@ -81,7 +81,7 @@ export function calculateRawSmileScore(
   if (left === undefined || right === undefined) return 0;
 
   const mean = (left + right) / 2;
-  return Math.min(1, Math.max(0, 0.4 * Math.min(left, right) + 0.6 * mean));
+  return Math.min(1, Math.max(0, 0.6 * Math.min(left, right) + 0.4 * mean));
 }
 
 export function createSmileFilterState(): SmileFilterState {

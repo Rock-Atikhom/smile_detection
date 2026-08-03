@@ -16,7 +16,7 @@ const categories = (left: number, right: number) => [
 describe("calculateRawSmileScore", () => {
   it("calculates the literal bilateral smile formula", () => {
     expect(calculateRawSmileScore(categories(0.8, 0.8))).toBeCloseTo(0.8, 12);
-    expect(calculateRawSmileScore(categories(0.8, 0.4))).toBeCloseTo(0.52, 12);
+    expect(calculateRawSmileScore(categories(0.8, 0.4))).toBeCloseTo(0.48, 12);
   });
 
   it("returns zero for missing, invalid, or ambiguous smile evidence", () => {
