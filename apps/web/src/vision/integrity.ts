@@ -3,6 +3,8 @@ import type { VisionReason } from "./protocol";
 
 export type { VisionAsset } from "./manifest";
 
+export const VISION_ASSET_ERROR_HEADER = "x-smart-smile-vision-error";
+
 export class VisionAssetError extends Error {
   readonly assetId: string;
   readonly code: VisionReason;
@@ -71,6 +73,11 @@ export async function verifyVisionResponse(
   asset: VisionAsset,
 ): Promise<Uint8Array> {
   if (!response.ok) {
+    if (
+      response.headers.get(VISION_ASSET_ERROR_HEADER) === "offline-cache-failed"
+    ) {
+      throw new VisionAssetOperationalError(asset.id);
+    }
     throw new VisionAssetError("runtime-download-failed", asset.id);
   }
 

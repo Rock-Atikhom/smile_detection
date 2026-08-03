@@ -6,7 +6,10 @@ import {
   precacheAndRoute,
   type PrecacheEntry,
 } from "workbox-precaching";
-import { VisionAssetError } from "../vision/integrity";
+import {
+  VISION_ASSET_ERROR_HEADER,
+  VisionAssetError,
+} from "../vision/integrity";
 import { VISION_RELEASE_PATH_PREFIX } from "../vision/manifest";
 import { VISION_MANIFEST } from "../vision/release";
 import {
@@ -247,7 +250,12 @@ self.addEventListener("fetch", (event) => {
       } catch (error) {
         return isIntegrityFailure(error)
           ? new Response(new Uint8Array(), { status: 200 })
-          : new Response(null, { status: 503 });
+          : new Response(null, {
+              headers: {
+                [VISION_ASSET_ERROR_HEADER]: "offline-cache-failed",
+              },
+              status: 503,
+            });
       }
     })(),
   );

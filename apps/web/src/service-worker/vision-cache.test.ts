@@ -382,6 +382,32 @@ describe("vision release cache transaction", () => {
     expect(cacheStorage.caches.has(visionCacheName(olderReleaseId))).toBe(true);
   });
 
+  it("cannot commit when cancelled while the completion-marker write is pending", async () => {
+    const { cacheStorage, dependencies } = harness();
+    await seedCompletion(cacheStorage, olderReleaseId);
+    const currentCache = await cacheStorage.open(visionCacheName(releaseId));
+    const originalPut = currentCache.put.bind(currentCache);
+    const markerWriteStarted = deferred<void>();
+    const releaseMarkerWrite = deferred<void>();
+    currentCache.put = vi.fn(async (request, response) => {
+      await originalPut(request, response);
+      if (requestKey(request) === completionUrl(scope, releaseId)) {
+        markerWriteStarted.resolve();
+        await releaseMarkerWrite.promise;
+      }
+    });
+
+    const pending = cacheVisionRelease(command(9), ownerId, dependencies);
+    await markerWriteStarted.promise;
+    cancelVisionRelease(ownerId, 9, releaseId);
+    releaseMarkerWrite.resolve();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(cacheStorage.caches.has(visionCacheName(releaseId))).toBe(false);
+    expect(cacheStorage.deleted).toEqual([visionCacheName(releaseId)]);
+    expect(cacheStorage.caches.has(visionCacheName(olderReleaseId))).toBe(true);
+  });
+
   it("serializes overlapping generations so one failure cannot orphan its successor", async () => {
     const { cacheStorage, dependencies } = harness();
     const originalFetch = dependencies.fetch;

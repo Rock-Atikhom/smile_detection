@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { VisionAssetError } from "../vision/integrity";
+import { verifyVisionResponse, VisionAssetError } from "../vision/integrity";
 import { VISION_MANIFEST } from "../vision/release";
 import { VISION_RELEASE_PATH_PREFIX } from "../vision/manifest";
 import {
@@ -7,6 +7,7 @@ import {
   type VisionCacheEvent,
   type VisionServiceWorkerHandshakeEvent,
 } from "../vision/protocol";
+import { VisionCacheOperationalError } from "./vision-cache";
 
 const mocks = vi.hoisted(() => ({
   cacheVisionRelease: vi.fn(),
@@ -382,6 +383,33 @@ describe("vision service worker", () => {
     } as never);
 
     await expect(responsePromise).resolves.toMatchObject({ status: 503 });
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it("carries an operational immutable-cache failure to runtime verification without network fallback", async () => {
+    mocks.matchCompletedVisionAsset.mockRejectedValue(
+      new VisionCacheOperationalError(),
+    );
+    const network = vi.fn(async () => new Response("unverified network"));
+    vi.stubGlobal("fetch", network);
+    const { listeners } = await loadWorker();
+    const asset = VISION_MANIFEST.assets[0]!;
+    let responsePromise!: Promise<Response>;
+
+    listeners.get("fetch")!({
+      request: new Request(new URL(asset.path, "https://app.test")),
+      respondWith: (promise: Promise<Response>) => {
+        responsePromise = promise;
+      },
+    } as never);
+
+    const response = await responsePromise;
+    const verification = verifyVisionResponse(response, asset);
+    await expect(verification).rejects.toMatchObject({
+      assetId: asset.id,
+      code: "offline-cache-failed",
+    });
+    expect(await response.text()).toBe("");
     expect(network).not.toHaveBeenCalled();
   });
 

@@ -567,6 +567,7 @@ export async function cacheVisionRelease(
       completionUrl(dependencies.scope, command.releaseId),
       Response.json(completion),
     );
+    ensureNotCancelled(controller.signal);
     return "ready";
   } catch (error) {
     if (mutationStarted && cache !== undefined) {
