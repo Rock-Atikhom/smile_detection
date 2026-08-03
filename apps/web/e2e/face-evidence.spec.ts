@@ -20,11 +20,15 @@ type FaceEvidenceTestBridge = {
   facts(): {
     cancelled: number;
     latestCameraGeneration: number | null;
+    latestCapturedAtMs: number | null;
+    latestGeneration: number | null;
+    latestSequence: number | null;
     terminated: number;
     workers: number;
   };
   next(guidance: FaceGuidance): Promise<void>;
   waitForNewCameraGeneration(previous: number): Promise<void>;
+  waitForNewSequence(previous: number): Promise<void>;
 };
 
 declare global {
@@ -60,8 +64,13 @@ async function exposeSecondCamera(page: Page) {
 
 async function installFaceEvidenceWorker(page: Page) {
   await page.addInitScript(() => {
+    Object.defineProperty(window, "createImageBitmap", {
+      configurable: true,
+      value: async () => ({ close: () => undefined }) as unknown as ImageBitmap,
+    });
     type Frame = {
       cameraGeneration: number;
+      capturedAtMs: number;
       generation: number;
       height: number;
       orientation: "landscape" | "portrait";
@@ -96,17 +105,25 @@ async function installFaceEvidenceWorker(page: Page) {
       cancelled: number;
       lastDeliveredSequence: number;
       latestCameraGeneration: number | null;
+      latestCapturedAtMs: number | null;
+      latestGeneration: number | null;
+      latestSequence: number | null;
       terminated: number;
       waitForCamera: CameraWaiter[];
       waitForNext: NextWaiter | null;
+      waitForSequence: Array<{ previous: number; resolve(): void }>;
       workers: FakeWorker[];
     } = {
       cancelled: 0,
       lastDeliveredSequence: -1,
       latestCameraGeneration: null,
+      latestCapturedAtMs: null,
+      latestGeneration: null,
+      latestSequence: null,
       terminated: 0,
       waitForCamera: [],
       waitForNext: null,
+      waitForSequence: [],
       workers: [],
     };
 
@@ -120,7 +137,7 @@ async function installFaceEvidenceWorker(page: Page) {
       const facts = guidanceFacts[guidance];
       worker.dispatch({
         cameraGeneration: frame.cameraGeneration,
-        capturedAtMs: performance.now(),
+        capturedAtMs: frame.capturedAtMs,
         completedAtMs: performance.now(),
         generation: frame.generation,
         guidance,
@@ -197,9 +214,16 @@ async function installFaceEvidenceWorker(page: Page) {
             const frame = message as Frame & { type: "FRAME" };
             worker.latestFrame = frame;
             state.latestCameraGeneration = frame.cameraGeneration;
+            state.latestCapturedAtMs = frame.capturedAtMs;
+            state.latestGeneration = frame.generation;
+            state.latestSequence = frame.sequence;
             for (const waiter of state.waitForCamera.splice(0)) {
               if (frame.cameraGeneration > waiter.previous) waiter.resolve();
               else state.waitForCamera.push(waiter);
+            }
+            for (const waiter of state.waitForSequence.splice(0)) {
+              if (frame.sequence > waiter.previous) waiter.resolve();
+              else state.waitForSequence.push(waiter);
             }
             tryDeliverNext();
           }
@@ -225,6 +249,9 @@ async function installFaceEvidenceWorker(page: Page) {
         return {
           cancelled: state.cancelled,
           latestCameraGeneration: state.latestCameraGeneration,
+          latestCapturedAtMs: state.latestCapturedAtMs,
+          latestGeneration: state.latestGeneration,
+          latestSequence: state.latestSequence,
           terminated: state.terminated,
           workers: state.workers.length,
         };
@@ -245,6 +272,18 @@ async function installFaceEvidenceWorker(page: Page) {
         }
         return new Promise((resolve) => {
           state.waitForCamera.push({ previous, resolve });
+        });
+      },
+      waitForNewSequence(previous) {
+        const worker = currentWorker();
+        if (
+          worker?.latestFrame !== undefined &&
+          worker.latestFrame.sequence > previous
+        ) {
+          return Promise.resolve();
+        }
+        return new Promise((resolve) => {
+          state.waitForSequence.push({ previous, resolve });
         });
       },
     };
@@ -286,16 +325,44 @@ test("guides one face through the real coordinator without retaining or sending 
     await expect(status).toContainText(copy);
   }
 
+  const acceptedSequence = await page.evaluate(
+    () => window.__smartSmileFaceEvidence?.facts().latestSequence,
+  );
+  expect(acceptedSequence).not.toBeNull();
+  await page.evaluate(async (previous) => {
+    const testBridge = window.__smartSmileFaceEvidence;
+    if (testBridge === undefined)
+      throw new Error("Missing face evidence bridge");
+    await testBridge.waitForNewSequence(previous);
+  }, acceptedSequence!);
+
   await page.evaluate(() => {
     const testBridge = window.__smartSmileFaceEvidence;
     if (testBridge === undefined)
       throw new Error("Missing face evidence bridge");
-    testBridge.emit("face-ready", { generation: 999 });
+    const { latestGeneration } = testBridge.facts();
+    if (latestGeneration === null) throw new Error("Missing frame generation");
+    testBridge.emit("no-face", { generation: latestGeneration + 1 });
   });
   await expect(status).toContainText("Face ready");
   await page.evaluate(() => {
-    window.__smartSmileFaceEvidence?.emit("face-ready", {
-      capturedAtMs: 0,
+    const testBridge = window.__smartSmileFaceEvidence;
+    if (testBridge === undefined)
+      throw new Error("Missing face evidence bridge");
+    const { latestSequence } = testBridge.facts();
+    if (latestSequence === null) throw new Error("Missing frame sequence");
+    testBridge.emit("no-face", { sequence: latestSequence + 1 });
+  });
+  await expect(status).toContainText("Face ready");
+  await page.evaluate(() => {
+    const testBridge = window.__smartSmileFaceEvidence;
+    if (testBridge === undefined)
+      throw new Error("Missing face evidence bridge");
+    const { latestCapturedAtMs } = testBridge.facts();
+    if (latestCapturedAtMs === null)
+      throw new Error("Missing frame capture time");
+    testBridge.emit("no-face", {
+      capturedAtMs: Math.max(0, latestCapturedAtMs - 1_000),
     });
   });
   await expect(status).toContainText("Face ready");
@@ -311,13 +378,15 @@ test("guides one face through the real coordinator without retaining or sending 
       throw new Error("Missing face evidence bridge");
     await testBridge.waitForNewCameraGeneration(previous);
   }, beforeSwitch!.latestCameraGeneration!);
-  await page.evaluate(() => {
+  await page.evaluate((oldCameraGeneration) => {
     const testBridge = window.__smartSmileFaceEvidence;
     if (testBridge === undefined)
       throw new Error("Missing face evidence bridge");
-    testBridge.emit("face-ready", { cameraGeneration: 0 });
-  });
-  await expect(status).not.toContainText("Face ready");
+    testBridge.emit("no-face", {
+      cameraGeneration: oldCameraGeneration,
+    });
+  }, beforeSwitch!.latestCameraGeneration!);
+  await expect(status).toContainText("Camera ready");
   await page.evaluate(() => {
     window.__smartSmileFaceEvidence?.emit("face-ready");
   });

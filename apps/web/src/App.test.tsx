@@ -281,6 +281,8 @@ describe("Smart Smile camera session", () => {
 
   it("submits ready frames at a 100 ms cadence with separate runtime and camera generations", async () => {
     vi.useFakeTimers();
+    let monotonicNow = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => monotonicNow);
     vision.snapshot.generation = 17;
     const createImageBitmap = vi.fn(async () => ({ close: vi.fn() }));
     vi.stubGlobal("createImageBitmap", createImageBitmap);
@@ -292,11 +294,13 @@ describe("Smart Smile camera session", () => {
       expect.objectContaining({
         generation: 17,
         cameraGeneration: 1,
+        capturedAtMs: 1_000,
         sequence: 0,
       }),
     );
     await vi.advanceTimersByTimeAsync(99);
     expect(vision.submitFrame).toHaveBeenCalledTimes(1);
+    monotonicNow = 1_100;
     await vi.advanceTimersByTimeAsync(1);
     expect(vision.submitFrame).toHaveBeenCalledTimes(2);
     expect(createImageBitmap).toHaveBeenCalledTimes(2);

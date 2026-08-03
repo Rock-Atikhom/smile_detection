@@ -547,9 +547,10 @@ export default function App() {
 
     const height = snapshot.height;
     const width = snapshot.width;
+    const monotonicNow = () => performance.now();
     const pump = createBrowserFaceFramePump({
       video: videoRef.current,
-      now: Date.now,
+      now: monotonicNow,
       submit: vision.submitFrame,
     });
     let active = true;
@@ -557,9 +558,9 @@ export default function App() {
     faceFramePumpRef.current = pump;
     const schedule = () => {
       if (!active) return;
-      const now = Date.now();
-      if (now - lastCaptureAtMs >= 100) {
-        lastCaptureAtMs = now;
+      const currentTimeMs = monotonicNow();
+      if (currentTimeMs - lastCaptureAtMs >= 100) {
+        lastCaptureAtMs = currentTimeMs;
         void pump.tick({
           generation: vision.snapshot.generation,
           cameraGeneration: snapshot.generation,

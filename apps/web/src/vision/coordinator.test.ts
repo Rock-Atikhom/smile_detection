@@ -6,6 +6,7 @@ import type {
   VisionWorkerCommand,
   VisionWorkerEvent,
 } from "./protocol";
+import { createFaceFramePump } from "./face-frame-pump";
 import { VISION_MANIFEST, VISION_MANIFEST_URL } from "./release";
 import {
   createInitialVisionSnapshot,
@@ -219,6 +220,49 @@ describe("VisionCoordinator", () => {
     worker.dispatch(faceEvidence({ sequence: 9, capturedAtMs: 900 }));
     expect(harness.snapshot().face.lastSequence).toBe(8);
     expect(harness.snapshot().face.staleResults).toBe(1);
+  });
+
+  it("accepts evidence echoed from a submitted frame on the shared monotonic clock", async () => {
+    let now = 1_000;
+    const harness = createHarness({ now: () => now });
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockClear();
+    const pump = createFaceFramePump({
+      capture: vi.fn(async () => bitmap()),
+      now: () => now,
+      submit: (command) => harness.coordinator.submitFrame(command),
+    });
+
+    await expect(
+      pump.tick({
+        generation: 0,
+        cameraGeneration: 3,
+        width: 640,
+        height: 360,
+      }),
+    ).resolves.toBe(true);
+    const submitted = worker.messages.at(-1) as VisionFrameCommand;
+    expect(submitted.capturedAtMs).toBe(1_000);
+
+    now = 1_050;
+    worker.dispatch(
+      faceEvidence({
+        cameraGeneration: submitted.cameraGeneration,
+        capturedAtMs: submitted.capturedAtMs,
+        generation: submitted.generation,
+        guidance: "no-face",
+        eligible: false,
+        faceCount: 0,
+        sequence: submitted.sequence,
+      }),
+    );
+
+    expect(harness.snapshot().face).toMatchObject({
+      guidance: "no-face",
+      lastSequence: 0,
+      staleResults: 0,
+      state: "ready",
+    });
   });
 
   it("rejects duplicate, decreasing, future, and wrong-generation evidence", async () => {
