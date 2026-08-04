@@ -244,59 +244,36 @@ export class VisionCoordinator {
         wasmTier: "unknown",
       });
       if (!this.isCurrentPreflight(active)) return "failed";
-    }
 
-    const workerStarted = this.startWorker(
-      active.generation,
-      cacheState === "ready" ? "ready" : "caching",
-    );
-    if (!this.isCurrentPreflight(active)) return "failed";
-    if (cacheState === "missing") {
-      void this.completeCachePopulation(active);
-    } else {
-      this.activePreflight = undefined;
-    }
-    return workerStarted ? "started" : "failed";
-  }
+      const cacheResult = await this.populateCache(active);
+      if (!this.isCurrentPreflight(active)) return "failed";
 
-  private async completeCachePopulation(
-    active: ActivePreflight,
-  ): Promise<void> {
-    const result = await this.populateCache(active);
-    if (!this.isCurrentPreflight(active)) return;
-    this.activePreflight = undefined;
-
-    if (result === "integrity-failed") {
-      const worker = this.activeWorker;
-      if (worker?.generation === active.generation) {
-        try {
-          worker.port.postMessage({
-            type: "CANCEL",
-            generation: active.generation,
-          });
-        } catch {
-          // Termination below is the authoritative cleanup boundary.
-        }
-        this.closeWorker(worker);
+      if (cacheResult === "integrity-failed") {
+        this.activePreflight = undefined;
+        this.publishIntegrityFailure();
+        return "failed";
       }
-      this.publishIntegrityFailure();
-      return;
+
+      if (cacheResult === "error") {
+        this.activePreflight = undefined;
+        this.publish({
+          offlineCache: "error",
+          phase: null,
+          reason: "offline-cache-failed",
+          retryAvailable: true,
+          runtime: "error",
+          wasmTier: "unknown",
+        });
+        return "failed";
+      }
+
+      this.publish({ offlineCache: "ready" });
     }
 
-    if (result === "error") {
-      this.publish({
-        offlineCache: "error",
-        ...(this.snapshotValue.runtime === "error"
-          ? {}
-          : {
-              reason: "offline-cache-failed" as const,
-              retryAvailable: true,
-            }),
-      });
-      return;
-    }
-
-    this.publish({ offlineCache: "ready" });
+    const workerStarted = this.startWorker(active.generation, "ready");
+    if (!this.isCurrentPreflight(active)) return "failed";
+    this.activePreflight = undefined;
+    return workerStarted ? "started" : "failed";
   }
 
   private async populateCache(

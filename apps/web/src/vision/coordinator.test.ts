@@ -158,7 +158,7 @@ describe("VisionCoordinator", () => {
     });
   });
 
-  it("finishes the preflight before starting worker and cache work in parallel", async () => {
+  it("waits for first cache population before starting worker preparation", async () => {
     let finishQuery!: (result: "ready" | "missing") => void;
     const queryRelease = vi.fn(
       () =>
@@ -179,17 +179,8 @@ describe("VisionCoordinator", () => {
     await vi.waitFor(() =>
       expect(cache.client.cacheRelease).toHaveBeenCalled(),
     );
-    await expect(result).resolves.toBe("started");
-    expect(harness.dependencies.createWorker).toHaveBeenCalledOnce();
+    expect(harness.dependencies.createWorker).not.toHaveBeenCalled();
     expect(harness.dependencies.canFetchManifest).toHaveBeenCalledOnce();
-    expect(harness.workers[0]?.messages).toEqual([
-      {
-        type: "PREPARE",
-        generation: 0,
-        manifestUrl: VISION_MANIFEST_URL,
-        releaseId: VISION_MANIFEST.releaseId,
-      },
-    ]);
     expect(cache.client.cacheRelease).toHaveBeenCalledWith(
       {
         generation: 0,
@@ -199,6 +190,16 @@ describe("VisionCoordinator", () => {
       expect.any(Function),
     );
     cache.finishCache("ready");
+    await expect(result).resolves.toBe("started");
+    expect(harness.dependencies.createWorker).toHaveBeenCalledOnce();
+    expect(harness.workers[0]?.messages).toEqual([
+      {
+        type: "PREPARE",
+        generation: 0,
+        manifestUrl: VISION_MANIFEST_URL,
+        releaseId: VISION_MANIFEST.releaseId,
+      },
+    ]);
     await vi.waitFor(() =>
       expect(harness.snapshot().offlineCache).toBe("ready"),
     );
@@ -227,7 +228,7 @@ describe("VisionCoordinator", () => {
     expect(cache.client.cacheRelease).not.toHaveBeenCalled();
   });
 
-  it("starts runtime before cache completion and keeps a cache-only operational failure independent", async () => {
+  it("fails closed before worker preparation when first cache population fails operationally", async () => {
     const cache = createCache();
     cache.queryResult = "missing";
     const harness = createHarness({ cacheClient: cache.client });
@@ -236,28 +237,16 @@ describe("VisionCoordinator", () => {
     await vi.waitFor(() =>
       expect(cache.client.cacheRelease).toHaveBeenCalledOnce(),
     );
-    const workerStartedBeforeCacheFinished =
-      vi.mocked(harness.dependencies.createWorker).mock.calls.length === 1;
+    expect(harness.dependencies.createWorker).not.toHaveBeenCalled();
     cache.finishCache("error");
 
-    await expect(result).resolves.toBe("started");
-    expect(workerStartedBeforeCacheFinished).toBe(true);
+    await expect(result).resolves.toBe("failed");
+    expect(harness.dependencies.createWorker).not.toHaveBeenCalled();
     expect(harness.snapshot()).toMatchObject({
-      runtime: "preparing",
+      runtime: "error",
       offlineCache: "error",
       reason: "offline-cache-failed",
-    });
-
-    harness.workers[0]!.dispatch({
-      type: "READY",
-      generation: 0,
-      releaseId: VISION_MANIFEST.releaseId,
-      wasmTier: "simd",
-    });
-    expect(harness.snapshot()).toMatchObject({
-      runtime: "ready",
-      offlineCache: "error",
-      reason: null,
+      retryAvailable: true,
     });
   });
 
@@ -310,7 +299,7 @@ describe("VisionCoordinator", () => {
     },
   );
 
-  it("makes first-population integrity fatal and terminates the active runtime", async () => {
+  it("makes first-population integrity fatal before worker preparation", async () => {
     const cache = createCache();
     cache.queryResult = "missing";
     const harness = createHarness({ cacheClient: cache.client });
@@ -319,9 +308,10 @@ describe("VisionCoordinator", () => {
     await vi.waitFor(() =>
       expect(cache.client.cacheRelease).toHaveBeenCalled(),
     );
-    await expect(result).resolves.toBe("started");
+    expect(harness.dependencies.createWorker).not.toHaveBeenCalled();
     cache.finishCache("integrity-failed");
 
+    await expect(result).resolves.toBe("failed");
     await vi.waitFor(() =>
       expect(harness.snapshot()).toMatchObject({
         runtime: "error",
@@ -330,14 +320,10 @@ describe("VisionCoordinator", () => {
         retryAvailable: false,
       }),
     );
-    expect(harness.workers[0]!.messages.at(-1)).toEqual({
-      type: "CANCEL",
-      generation: 0,
-    });
-    expect(harness.workers[0]!.terminate).toHaveBeenCalledOnce();
+    expect(harness.dependencies.createWorker).not.toHaveBeenCalled();
   });
 
-  it("cancels concurrent cache and runtime work without late publication", async () => {
+  it("cancels first cache population without starting worker or late publication", async () => {
     const cache = createCache();
     cache.queryResult = "missing";
     const harness = createHarness({ cacheClient: cache.client });
@@ -346,19 +332,15 @@ describe("VisionCoordinator", () => {
     await vi.waitFor(() =>
       expect(cache.client.cacheRelease).toHaveBeenCalled(),
     );
-    await expect(result).resolves.toBe("started");
     harness.coordinator.cancel();
     cache.finishCache("ready");
 
+    await expect(result).resolves.toBe("failed");
     expect(cache.client.cancel).toHaveBeenCalledWith({
       generation: 0,
       releaseId: VISION_MANIFEST.releaseId,
     });
-    expect(harness.workers[0]!.messages.at(-1)).toEqual({
-      type: "CANCEL",
-      generation: 0,
-    });
-    expect(harness.workers[0]!.terminate).toHaveBeenCalledOnce();
+    expect(harness.dependencies.createWorker).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(harness.snapshot()).toMatchObject({
       generation: 1,
@@ -424,7 +406,7 @@ describe("VisionCoordinator", () => {
     expect(JSON.stringify(harness.snapshot())).not.toContain("private");
   });
 
-  it("keeps cache population independent when worker construction fails", async () => {
+  it("keeps first-populated cache ready when worker construction fails", async () => {
     const cache = createCache();
     cache.queryResult = "missing";
     const harness = createHarness({
@@ -438,24 +420,17 @@ describe("VisionCoordinator", () => {
     await vi.waitFor(() =>
       expect(cache.client.cacheRelease).toHaveBeenCalled(),
     );
-    expect(harness.dependencies.createWorker).toHaveBeenCalledOnce();
+    expect(harness.dependencies.createWorker).not.toHaveBeenCalled();
+    cache.finishCache("ready");
+
     await expect(pending).resolves.toBe("failed");
+    expect(harness.dependencies.createWorker).toHaveBeenCalledOnce();
     expect(harness.snapshot()).toMatchObject({
       runtime: "error",
-      offlineCache: "caching",
+      offlineCache: "ready",
       reason: "runtime-initialization-failed",
       retryAvailable: true,
     });
-    cache.finishCache("ready");
-
-    await vi.waitFor(() =>
-      expect(harness.snapshot()).toMatchObject({
-        runtime: "error",
-        offlineCache: "ready",
-        reason: "runtime-initialization-failed",
-        retryAvailable: true,
-      }),
-    );
   });
 
   it("does not start stale preparation when a subscriber cancels its notification", async () => {
