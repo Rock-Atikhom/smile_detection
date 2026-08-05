@@ -37,7 +37,7 @@ test("uses the approved full-stage overlay on a portrait phone", async ({
   await expect(stage).toBeVisible();
   await expect(overlay).toBeVisible();
   await expect(overlay.getByRole("status")).toContainText(
-    /Getting ready|Camera ready/,
+    /Getting smile detection ready|Getting ready|Camera ready/,
   );
 
   const box = await stage.boundingBox();

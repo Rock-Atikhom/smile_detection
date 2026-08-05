@@ -58,8 +58,16 @@ applies it to every path. It keeps scripts, styles, and connections self-only, u
 subresource requests through CSP, blocks objects and framing, allows the camera only for this
 origin, disables the microphone, omits referrers, prevents MIME sniffing, and enables HSTS.
 
-Ticket 03 may introduce self-hosted workers or WASM. It must add only the minimum directives proven
-necessary by browser tests; do not pre-emptively loosen the policy.
+### Ticket 03 runtime CSP
+
+Ticket 03 uses only the minimum proven expansion for the self-hosted runtime:
+`worker-src 'self'` permits the bundled classic worker from this origin and
+continues to reject `blob:` and `data:` workers. `script-src 'self'
+'wasm-unsafe-eval'` permits WebAssembly compilation for the pinned local
+runtime; `'wasm-unsafe-eval'` does not enable JavaScript `eval()`. Do not add
+`'unsafe-eval'`, a remote runtime/CDN origin, or a broad worker source. The
+browser acceptance suite verifies these exact CSP boundaries while initializing
+the runtime; Ticket 03 does not process participant frames.
 
 ## Post-deploy check
 

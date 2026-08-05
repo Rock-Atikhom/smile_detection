@@ -28,3 +28,40 @@ comfort, assistive announcements, and MacBook keyboard behavior.
 
 Real Cloudflare preview and response-header evidence remains an owner-run acceptance step until the
 project and credentials are configured.
+
+## Ticket 03 runtime validation
+
+Ticket 03's automated browser acceptance initializes the self-hosted
+`@mediapipe/tasks-vision@0.10.35` / Face Landmarker `float16/1` release from
+same-origin assets, verifies the manifest release ID `6c23e451b7a9b523`, and
+proves an online setup can close and reopen offline. It also covers the
+shell-only first-use-offline recovery, integrity failure, incomplete-cache
+rollback, the allowlisted static-cache inventory, and production CSP. This is a
+runtime-initialization boundary only; it is not evidence of frame processing,
+landmark extraction, or smile detection.
+
+Run the release checks from the repository root:
+
+```bash
+npm run vision:vendor --workspace=@smart-smile/web
+npm run web:vision:check
+npm run web:format:check
+npm run web:lint
+npm run web:typecheck
+npm run web:test
+npm run web:build
+npm run web:e2e -- vision-runtime.spec.ts delivery-config.spec.ts
+npm run web:e2e
+```
+
+The vendoring command is for an intentional reviewed refresh; the manifest check
+must pass before shipping. For named physical-browser acceptance, use online preparation followed by airplane-mode close/reopen: online, select **Continue to camera** and wait until both runtime and offline use report ready; close the browser page; enable airplane mode; reopen the page; select **Continue to camera**; then confirm **Camera ready** without a network request. Record only the privacy-safe fields in [the Ticket 03 device matrix](ticket-03-device-matrix.md).
+Do not record camera content, device identifiers, landmarks, geometry, scores,
+or participant information.
+
+Production-browser acceptance also corrupts a non-runtime model-card entry in a
+completed release before offline reopen and verifies whole-cache deletion, fatal
+focused recovery, and zero camera requests. A separate first-install fault turns
+network WASM corrupt after its first cache-population response; successful
+initialization with one server request proves MediaPipe consumes the completed
+verified cache rather than refetching executable bytes from the network.

@@ -9,6 +9,7 @@ export default tseslint.config(
     ignores: [
       "apps/web/dist/**",
       "apps/web/playwright-report/**",
+      "apps/web/public/vision/**",
       "apps/web/test-results/**",
       "**/node_modules/**",
     ],
@@ -32,6 +33,12 @@ export default tseslint.config(
         "warn",
         { allowConstantExport: true },
       ],
+    },
+  },
+  {
+    files: ["apps/web/scripts/**/*.mjs"],
+    languageOptions: {
+      globals: globals.node,
     },
   },
   {

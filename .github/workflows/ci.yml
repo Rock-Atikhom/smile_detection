@@ -34,6 +34,9 @@ jobs:
       - name: Install locked web dependencies
         run: npm ci
 
+      - name: Verify vendored vision release
+        run: npm run web:vision:check
+
       - name: Check web formatting
         run: npm run web:format:check
 
@@ -94,6 +97,65 @@ jobs:
 
       - name: Run type checks
         run: make python-mypy
+
+  deploy-preview-pages:
+    name: Deploy / Cloudflare Pages (development preview)
+    if: >-
+      vars.CLOUDFLARE_PAGES_DEPLOY_ENABLED == 'true' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node 22.22.2
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Install exact npm runtime
+        run: npm install --global npm@10.9.7
+
+      - name: Install locked web dependencies
+        run: npm ci
+
+      - name: Verify vendored vision release
+        run: npm run web:vision:check
+
+      - name: Check web formatting
+        run: npm run web:format:check
+
+      - name: Run web lint checks
+        run: npm run web:lint
+
+      - name: Run web type checks
+        run: npm run web:typecheck
+
+      - name: Run web unit and component tests
+        run: npm run web:test
+
+      - name: Build the web application
+        run: npm run web:build
+
+      - name: Deploy development preview
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          wranglerVersion: 4.115.0
+          command: >-
+            pages deploy apps/web/dist
+            --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+            --branch=${{ github.head_ref }}
+            --commit-hash=${{ github.event.pull_request.head.sha }}
 
   deploy-pages:
     name: Deploy / Cloudflare Pages

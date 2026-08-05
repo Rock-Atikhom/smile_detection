@@ -44,6 +44,34 @@ npm run web:build
 npm run web:e2e
 ```
 
+## Offline vision runtime
+
+Ticket 03 prepares a self-hosted, on-device vision runtime; it stops at runtime
+initialization and verified offline reopening. It does not submit camera frames,
+extract landmarks or blendshapes for the application, or detect smiles. No
+dataset is collected and no custom model is trained.
+
+The pinned release is `@mediapipe/tasks-vision@0.10.35` with the official Face
+Landmarker `float16/1` model. Its generated, checked-in manifest is
+`apps/web/src/vision/generated/release-manifest.json` (release ID
+`6c23e451b7a9b523`); immutable runtime files are under
+`apps/web/public/vision/mediapipe-0.10.35-face-landmarker-float16-v1/`.
+
+To intentionally refresh vendored assets and then verify that the committed
+manifest exactly matches them, run:
+
+```bash
+npm run vision:vendor --workspace=@smart-smile/web
+npm run web:vision:check
+npm run web:build
+npm run web:e2e -- vision-runtime.spec.ts
+```
+
+`vision:vendor` changes the checked-in release only when an explicitly reviewed
+upgrade is intended. See the [architecture](docs/architecture/README.md),
+[privacy boundary](docs/privacy/README.md), [validation guide](docs/validation/README.md),
+and [third-party notices](THIRD_PARTY_NOTICES.md) before redistributing it.
+
 `web:build` creates `apps/web/dist` once. `web:e2e` serves that exact bundle with the committed
 production headers and checks the shell at 390x844, 844x390, 768x1024, and 1440x900. The tests
 attach one screenshot for each named viewport.
