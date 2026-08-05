@@ -145,6 +145,15 @@ async function installFaceEvidenceWorker(page: Page) {
           frame.sequence,
         );
       }
+      const observation = facts.eligible
+        ? {
+            anchors: [-0.25, -0.2, 0.25, -0.2, 0.0, 0.0, 0.0, 0.3],
+            centerX: 0.5,
+            centerY: 0.5,
+            height: 0.5,
+            width: 0.3,
+          }
+        : null;
       worker.dispatch({
         cameraGeneration: frame.cameraGeneration,
         capturedAtMs: frame.capturedAtMs,
@@ -152,7 +161,9 @@ async function installFaceEvidenceWorker(page: Page) {
         generation: frame.generation,
         guidance,
         height: frame.height,
+        observation,
         orientation: frame.orientation,
+        rawSmileScore: facts.eligible ? 0.72 : 0,
         sequence: frame.sequence,
         tier: frame.tier,
         type: "FACE_EVIDENCE",
@@ -329,7 +340,7 @@ test("guides one face through the real coordinator without retaining or sending 
     ["too-close", "Move back"],
     ["too-far", "Move closer"],
     ["off-center", "Center your face"],
-    ["face-ready", "Face ready"],
+    ["face-ready", "Hold still"],
   ] as const) {
     await emitNext(page, guidance);
     await expect(status).toContainText(copy);
@@ -354,7 +365,7 @@ test("guides one face through the real coordinator without retaining or sending 
     if (latestGeneration === null) throw new Error("Missing frame generation");
     testBridge.emit("no-face", { generation: latestGeneration + 1 });
   });
-  await expect(status).toContainText("Face ready");
+  await expect(status).toContainText("Hold still");
   await page.evaluate(() => {
     const testBridge = window.__smartSmileFaceEvidence;
     if (testBridge === undefined)
@@ -363,7 +374,7 @@ test("guides one face through the real coordinator without retaining or sending 
     if (latestSequence === null) throw new Error("Missing frame sequence");
     testBridge.emit("no-face", { sequence: latestSequence + 1 });
   });
-  await expect(status).toContainText("Face ready");
+  await expect(status).toContainText("Hold still");
   await page.evaluate(() => {
     const testBridge = window.__smartSmileFaceEvidence;
     if (testBridge === undefined)
@@ -375,7 +386,7 @@ test("guides one face through the real coordinator without retaining or sending 
       capturedAtMs: Math.max(0, latestCapturedAtMs - 1_000),
     });
   });
-  await expect(status).toContainText("Face ready");
+  await expect(status).toContainText("Hold still");
 
   const beforeSwitch = await page.evaluate(() =>
     window.__smartSmileFaceEvidence?.facts(),
@@ -400,7 +411,7 @@ test("guides one face through the real coordinator without retaining or sending 
   await page.evaluate(() => {
     window.__smartSmileFaceEvidence?.emit("face-ready");
   });
-  await expect(status).toContainText("Face ready");
+  await expect(status).toContainText("Hold still");
 
   await page.getByRole("button", { name: "Stop camera" }).click();
   await expect(

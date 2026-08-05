@@ -68,3 +68,20 @@ guidance, stale-result rejection, Stop, and Switch. This is application-level
 evidence, not a claim about browser or operating-system internal memory. The
 Ticket 03 first-load race remains a release blocker; completed-cache reopen is
 development-only preparation for subsequent face-guidance testing.
+
+## Ticket 05 smile-score and continuity privacy boundary
+
+Ticket 05 derives one aggregate raw Smile Score per accepted frame from the two
+mouth-smile blendshapes and an anonymous continuity observation. The worker
+reduces the frame to that fixed observation plus the raw score and discards all
+MediaPipe geometry; landmark arrays, blendshapes, category names, coordinates,
+and images never cross the worker boundary.
+
+The observation is ephemeral and is only used to maintain a pure continuity
+tracker. It is discarded after accepted processing and is never exposed through
+React state, the DOM, diagnostics, reports, storage (Cache Storage,
+localStorage, sessionStorage, IndexedDB, cookies), service-worker caches,
+network requests, or logs. Current raw/smoothed aggregates appear only as a
+current-instant readout in the on-device Help panel; no score time series or
+biometric record is retained. No participant dataset is collected or used for
+custom training.

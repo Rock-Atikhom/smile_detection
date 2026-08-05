@@ -1,4 +1,4 @@
-Status: planned
+Status: in review
 Execution: agent-led, with calibration review
 
 # 05 — Verify anonymous continuity and a sustained smile
@@ -15,7 +15,7 @@ One anonymous participant can build understandable smile progress while short no
 
 ## Acceptance criteria
 
-- [ ] Port the approved anonymous continuity contract without recognition, embeddings, names, or persistent identity.
+- [x] Port the approved anonymous continuity contract without recognition, embeddings, names, or persistent identity.
 - [ ] Require three consecutive continuity matches before progress and preserve the approved brief hold/expiry behavior.
 - [ ] Derive Smile Score from left/right mouth-smile blendshapes with the approved bilateral formula.
 - [ ] Apply approved EMA alpha, high/low hysteresis, validation ranges, and Grace Window.

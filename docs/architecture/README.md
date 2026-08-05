@@ -101,3 +101,21 @@ no UI control in the application.
 Ticket 04 does not remove the Ticket 03 first-load browser race: it remains a
 release blocker. A completed-cache close/reopen is valid only for development
 demonstration and manual testing preparation until Ticket 03 is resolved.
+
+## Ticket 05 continuity and sustained-smile boundary
+
+Ticket 05 computes an anonymous continuity match and a sustained-smile
+verification from worker-reduced evidence. The worker reduces one accepted
+frame to a fixed ephemeral observation (center, width, height, and an
+eight-number anchor vector) plus one aggregate raw Smile Score, and posts only
+those to the coordinator. The coordinator then feeds a pure continuity tracker
+and a pure verification reducer; React renders only the resulting qualitative
+status (`Hold still`, `Smile when you are ready`, `Keep smiling`, `Smile
+verified`) and a native progress element.
+
+The fixed ephemeral observation crosses only worker-to-coordinator and is
+discarded after accepted processing; it is never copied into a snapshot, DOM,
+report, storage, service-worker cache, or network. No biopsy geometry, anchors,
+landmark arrays, blendshapes, category names, participant identifiers, or a
+biometric time series are retained. Current raw/smoothed aggregates appear only
+in the current-instant Help diagnostics, never persisted.
