@@ -57,9 +57,13 @@
 expect(calculateRawSmileScore(categories(0.8, 0.8))).toBeCloseTo(0.8, 12);
 expect(calculateRawSmileScore(categories(0.8, 0.4))).toBeCloseTo(0.48, 12);
 expect(calculateRawSmileScore([])).toBe(0);
-expect(calculateRawSmileScore([{ categoryName: "mouthSmileLeft", score: NaN }])).toBe(0);
+expect(
+  calculateRawSmileScore([{ categoryName: "mouthSmileLeft", score: NaN }]),
+).toBe(0);
 expect(calculateRawSmileScore(categories(1.01, 0.8))).toBe(0);
-expect(calculateRawSmileScore([...categories(0.8, 0.8), ...categories(0.7, 0.7)])).toBe(0);
+expect(
+  calculateRawSmileScore([...categories(0.8, 0.8), ...categories(0.7, 0.7)]),
+).toBe(0);
 ```
 
 - [ ] **Step 2: Verify RED**
@@ -130,8 +134,10 @@ export function updateSmileFilter(
   rawScore: number,
   profile: Readonly<SmileProfile> = DEFAULT_SMILE_PROFILE,
 ): SmileFilterState {
-  const score = Number.isFinite(rawScore) && rawScore >= 0 && rawScore <= 1 ? rawScore : 0;
-  const smoothedScore = profile.alpha * score + (1 - profile.alpha) * previous.smoothedScore;
+  const score =
+    Number.isFinite(rawScore) && rawScore >= 0 && rawScore <= 1 ? rawScore : 0;
+  const smoothedScore =
+    profile.alpha * score + (1 - profile.alpha) * previous.smoothedScore;
   const smileValid = previous.smileValid
     ? smoothedScore >= profile.lowThreshold
     : smoothedScore >= profile.highThreshold;
@@ -196,13 +202,34 @@ Run: `npm exec -- vitest run src/vision/face-evidence.test.ts`
 
 ```ts
 const tracker = createFaceContinuityTracker();
-expect(tracker.update(analysisAt(0, faceA))).toMatchObject({ state: "candidate", consecutiveMatches: 1 });
-expect(tracker.update(analysisAt(75, movedA))).toMatchObject({ state: "candidate", consecutiveMatches: 2 });
-expect(tracker.update(analysisAt(150, movedAgainA))).toMatchObject({ state: "ready", consecutiveMatches: 3 });
-expect(tracker.update(noFaceAt(250))).toMatchObject({ state: "grace", reason: "no-face" });
-expect(tracker.update(analysisAt(300, movedA))).toMatchObject({ state: "ready" });
-expect(tracker.update(analysisAt(350, replacementB))).toMatchObject({ state: "grace", reason: "nonmatch" });
-expect(tracker.update(analysisAt(651, replacementB))).toMatchObject({ state: "candidate", consecutiveMatches: 1, reset: true });
+expect(tracker.update(analysisAt(0, faceA))).toMatchObject({
+  state: "candidate",
+  consecutiveMatches: 1,
+});
+expect(tracker.update(analysisAt(75, movedA))).toMatchObject({
+  state: "candidate",
+  consecutiveMatches: 2,
+});
+expect(tracker.update(analysisAt(150, movedAgainA))).toMatchObject({
+  state: "ready",
+  consecutiveMatches: 3,
+});
+expect(tracker.update(noFaceAt(250))).toMatchObject({
+  state: "grace",
+  reason: "no-face",
+});
+expect(tracker.update(analysisAt(300, movedA))).toMatchObject({
+  state: "ready",
+});
+expect(tracker.update(analysisAt(350, replacementB))).toMatchObject({
+  state: "grace",
+  reason: "nonmatch",
+});
+expect(tracker.update(analysisAt(651, replacementB))).toMatchObject({
+  state: "candidate",
+  consecutiveMatches: 1,
+  reset: true,
+});
 ```
 
 Test center distance exactly `0.15`, scale exactly `0.67` and `1.50`, anchor delta exactly `0.12`, each just outside boundary, adaptation factor `0.25`, established-zone tolerance, no-face, multiple faces, off-zone observations, recovery at exactly `300 ms`, expiry above `300 ms`, reset, and decreasing timestamps.
@@ -257,9 +284,18 @@ Use literal timestamped samples. Neutral and speech traces never leave `waiting`
 
 ```ts
 let state = createSmileVerificationState();
-state = advanceSmileVerification(state, sample({ capturedAtMs: 1_000, rawScore: 1, continuity: "ready" }));
-state = advanceSmileVerification(state, sample({ capturedAtMs: 1_100, rawScore: 1, continuity: "ready" }));
-state = advanceSmileVerification(state, sample({ capturedAtMs: 1_200, rawScore: 1, continuity: "ready" }));
+state = advanceSmileVerification(
+  state,
+  sample({ capturedAtMs: 1_000, rawScore: 1, continuity: "ready" }),
+);
+state = advanceSmileVerification(
+  state,
+  sample({ capturedAtMs: 1_100, rawScore: 1, continuity: "ready" }),
+);
+state = advanceSmileVerification(
+  state,
+  sample({ capturedAtMs: 1_200, rawScore: 1, continuity: "ready" }),
+);
 expect(state.phase).toBe("verifying");
 expect(state.progressMs).toBe(0);
 ```
@@ -275,11 +311,7 @@ Expected: FAIL because the module does not exist.
 ```ts
 export type VerificationPhase = "waiting" | "verifying" | "paused" | "complete";
 export type VerificationReason =
-  | "none"
-  | "warming"
-  | "face-invalid"
-  | "continuity-lost"
-  | "smile-lost";
+  "none" | "warming" | "face-invalid" | "continuity-lost" | "smile-lost";
 
 export interface SmileVerificationState {
   phase: VerificationPhase;
@@ -360,10 +392,26 @@ Return one face landmark fixture and a complete MediaPipe blendshape classificat
 ```ts
 detectForVideo.mockReturnValueOnce({
   faceLandmarks: [landmarks],
-  faceBlendshapes: [{ categories: [
-    { categoryName: "mouthSmileLeft", displayName: "", index: 44, score: 0.8 },
-    { categoryName: "mouthSmileRight", displayName: "", index: 45, score: 0.4 },
-  ], headIndex: 0, headName: "" }],
+  faceBlendshapes: [
+    {
+      categories: [
+        {
+          categoryName: "mouthSmileLeft",
+          displayName: "",
+          index: 44,
+          score: 0.8,
+        },
+        {
+          categoryName: "mouthSmileRight",
+          displayName: "",
+          index: 45,
+          score: 0.4,
+        },
+      ],
+      headIndex: 0,
+      headName: "",
+    },
+  ],
   facialTransformationMatrixes: [],
 });
 ```
@@ -463,11 +511,26 @@ git commit -m "feat: coordinate smile verification"
 Assert these priority outcomes after camera/runtime recovery states:
 
 ```ts
-expect(statusFor({ face: "face-ready", continuity: "candidate" })).toBe("Hold still");
-expect(statusFor({ face: "face-ready", continuity: "ready", phase: "waiting" })).toBe("Smile when you are ready");
-expect(statusFor({ face: "face-ready", continuity: "ready", phase: "verifying" })).toBe("Keep smiling");
-expect(statusFor({ face: "face-ready", continuity: "ready", phase: "paused", reason: "smile-lost" })).toBe("Keep smiling");
-expect(statusFor({ face: "face-ready", continuity: "ready", phase: "complete" })).toBe("Smile verified");
+expect(statusFor({ face: "face-ready", continuity: "candidate" })).toBe(
+  "Hold still",
+);
+expect(
+  statusFor({ face: "face-ready", continuity: "ready", phase: "waiting" }),
+).toBe("Smile when you are ready");
+expect(
+  statusFor({ face: "face-ready", continuity: "ready", phase: "verifying" }),
+).toBe("Keep smiling");
+expect(
+  statusFor({
+    face: "face-ready",
+    continuity: "ready",
+    phase: "paused",
+    reason: "smile-lost",
+  }),
+).toBe("Keep smiling");
+expect(
+  statusFor({ face: "face-ready", continuity: "ready", phase: "complete" }),
+).toBe("Smile verified");
 ```
 
 Assert no raw/smoothed number occurs in participant DOM text. While verifying/paused/complete, require a native `progress` element named `Smile verification progress`, with `max=5000`, current `value`, and visible text `Building smile progress`, `Smile progress paused`, or `Smile verification complete`.
