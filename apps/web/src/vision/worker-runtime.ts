@@ -10,7 +10,8 @@ import {
   type VisionWorkerCommand,
   type VisionWorkerEvent,
 } from "./protocol";
-import { classifyFaceLandmarks } from "./face-evidence";
+import { analyzeFaceLandmarks } from "./face-evidence";
+import { calculateRawSmileScore } from "./smile-score";
 
 interface ActiveGeneration {
   controller: AbortController;
@@ -35,6 +36,59 @@ function closeBitmap(bitmap: ImageBitmap): void {
   } catch {
     // Bitmap cleanup is best-effort at the worker boundary.
   }
+}
+
+interface MediaPipeCategory {
+  categoryName?: unknown;
+  score?: unknown;
+}
+
+interface MediaPipeBlendshape {
+  categories?: MediaPipeCategory[];
+}
+
+function rawSmileScoreFromResult(result: unknown): number {
+  if (
+    (typeof result !== "object" && typeof result !== "function") ||
+    result === null
+  ) {
+    return 0;
+  }
+  const blendshapes = ownDataProperty(result, "faceBlendshapes");
+  if (
+    !Array.isArray(blendshapes) ||
+    blendshapes.length !== 1 ||
+    !isPlainObject(blendshapes[0])
+  ) {
+    return 0;
+  }
+  const shape = blendshapes[0] as MediaPipeBlendshape;
+  if (!Array.isArray(shape.categories)) {
+    return 0;
+  }
+  const categories: { categoryName: string; score: number }[] = [];
+  for (const category of shape.categories) {
+    if (!isPlainObject(category)) return 0;
+    const { categoryName, score } = category as MediaPipeCategory;
+    if (
+      typeof categoryName !== "string" ||
+      typeof score !== "number" ||
+      !Number.isFinite(score)
+    ) {
+      return 0;
+    }
+    categories.push({ categoryName, score });
+  }
+  return calculateRawSmileScore(categories);
+}
+
+function isPlainObject(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
 }
 
 function ownDataProperty(value: unknown, key: PropertyKey): unknown {
@@ -129,7 +183,27 @@ export function createVisionWorkerRuntime(
         return;
       }
 
-      const evidence = classifyFaceLandmarks(result.faceLandmarks);
+      const analysis = analyzeFaceLandmarks(result.faceLandmarks);
+      const rawSmileScore =
+        analysis.faceCount === 1 ? rawSmileScoreFromResult(result) : 0;
+      const observation = analysis.observation
+        ? {
+            centerX: analysis.observation.centerX,
+            centerY: analysis.observation.centerY,
+            width: analysis.observation.width,
+            height: analysis.observation.height,
+            anchors: [...analysis.observation.anchors] as [
+              number,
+              number,
+              number,
+              number,
+              number,
+              number,
+              number,
+              number,
+            ],
+          }
+        : null;
       postMessage({
         type: "FACE_EVIDENCE",
         generation: candidate.generation,
@@ -141,7 +215,11 @@ export function createVisionWorkerRuntime(
         height: frame.height,
         orientation: frame.orientation,
         tier: frame.tier,
-        ...evidence,
+        faceCount: analysis.faceCount,
+        guidance: analysis.guidance,
+        eligible: analysis.initialEligible,
+        observation,
+        rawSmileScore,
       });
     } catch (error) {
       inferenceFailure = mapFailure(error);

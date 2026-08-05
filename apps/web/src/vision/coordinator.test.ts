@@ -156,6 +156,8 @@ function faceEvidence(
     faceCount: 1,
     guidance: "face-ready",
     eligible: true,
+    observation: null,
+    rawSmileScore: 0,
     ...overrides,
   };
 }

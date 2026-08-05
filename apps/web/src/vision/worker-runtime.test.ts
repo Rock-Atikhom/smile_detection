@@ -89,6 +89,50 @@ const eligibleFace = [
   { x: 0.65, y: 0.65 },
 ];
 
+const FACE_LANDMARK_COUNT = 478;
+const SMILE_ANCHORS: Record<number, { x: number; y: number }> = {
+  10: { x: 0.5, y: 0.25 },
+  152: { x: 0.5, y: 0.4 },
+  263: { x: 0.4, y: 0.5 },
+  33: { x: 0.6, y: 0.5 },
+};
+const SMILE_EXTREMES = {
+  left: 0.35,
+  top: 0.25,
+  right: 0.65,
+  bottom: 0.75,
+};
+
+function smileMesh(): { x: number; y: number }[] {
+  const points: { x: number; y: number }[] = [];
+  for (let i = 0; i < FACE_LANDMARK_COUNT; i++) {
+    points.push({ x: 0.5, y: 0.5 });
+  }
+  for (const [index, point] of Object.entries(SMILE_ANCHORS)) {
+    points[Number(index)] = point;
+  }
+  points[1] = { x: SMILE_EXTREMES.left, y: SMILE_EXTREMES.top };
+  points[2] = { x: SMILE_EXTREMES.right, y: SMILE_EXTREMES.top };
+  points[3] = { x: SMILE_EXTREMES.left, y: SMILE_EXTREMES.bottom };
+  points[4] = { x: SMILE_EXTREMES.right, y: SMILE_EXTREMES.bottom };
+  return points;
+}
+
+function blendshape(categories: unknown[] = []) {
+  return [
+    {
+      categories,
+      headIndex: 0,
+      headName: "",
+    },
+  ];
+}
+
+const smileCategories = [
+  { categoryName: "mouthSmileLeft", displayName: "", index: 44, score: 0.8 },
+  { categoryName: "mouthSmileRight", displayName: "", index: 45, score: 0.4 },
+];
+
 function readyRuntime(instance = prepared()) {
   vi.mocked(prepareVisionRuntime).mockResolvedValue(instance);
   const postMessage = vi.fn<(event: VisionWorkerEvent) => void>();
@@ -343,6 +387,8 @@ describe("createVisionWorkerRuntime", () => {
       faceCount: 1,
       guidance: "face-ready",
       eligible: true,
+      observation: null,
+      rawSmileScore: 0,
     });
   });
 
@@ -489,6 +535,185 @@ describe("createVisionWorkerRuntime", () => {
 
     expect(image.close).toHaveBeenCalledOnce();
     expect(instance.detectForVideo).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+  });
+
+  it("posts a reduced event with one normalized observation and raw smile score", async () => {
+    const instance = prepared();
+    instance.detectForVideo.mockReturnValueOnce({
+      faceLandmarks: [smileMesh()],
+      faceBlendshapes: blendshape(smileCategories),
+      facialTransformationMatrixes: [],
+    });
+    const { postMessage, runtime } = readyRuntime(instance);
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, image));
+
+    const evidence = postMessage.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === "FACE_EVIDENCE");
+    expect(evidence).toMatchObject({
+      type: "FACE_EVIDENCE",
+      faceCount: 1,
+      guidance: "face-ready",
+      eligible: true,
+    });
+    expect(
+      evidence?.type === "FACE_EVIDENCE" ? evidence.rawSmileScore : NaN,
+    ).toBeCloseTo(0.48, 5);
+    expect(
+      evidence?.type === "FACE_EVIDENCE" && evidence.observation,
+    ).toMatchObject({
+      centerX: expect.closeTo(0.5, 5),
+      centerY: expect.closeTo(0.5, 5),
+      width: expect.closeTo(0.3, 5),
+      height: expect.closeTo(0.5, 5),
+    });
+    const anchors =
+      evidence?.type === "FACE_EVIDENCE" && evidence.observation
+        ? evidence.observation.anchors
+        : [];
+    expect(anchors).toHaveLength(8);
+    const expectedAnchors = [0, -0.5, 0, -0.2, -0.2, 0, 0.2, 0];
+    anchors.forEach((value, index) => {
+      expect(value).toBeCloseTo(expectedAnchors[index] ?? 0, 5);
+    });
+    const json = JSON.stringify(postMessage.mock.calls);
+    expect(json).not.toContain("faceLandmarks");
+    expect(json).not.toContain("faceBlendshapes");
+    expect(json).not.toContain("categoryName");
+    expect(json).not.toContain("mouthSmileLeft");
+    expect(json).not.toContain("mouthSmileRight");
+    expect(json).not.toContain("facialTransformationMatrixes");
+    expect(image.close).toHaveBeenCalledOnce();
+  });
+
+  it("posts a zero raw score but keeps the observation when classification is missing", async () => {
+    const instance = prepared();
+    instance.detectForVideo.mockReturnValueOnce({
+      faceLandmarks: [smileMesh()],
+      faceBlendshapes: [],
+      facialTransformationMatrixes: [],
+    });
+    const { postMessage, runtime } = readyRuntime(instance);
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, image));
+
+    const evidence = postMessage.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === "FACE_EVIDENCE");
+    expect(evidence).toMatchObject({
+      type: "FACE_EVIDENCE",
+      faceCount: 1,
+      guidance: "face-ready",
+      eligible: true,
+      rawSmileScore: 0,
+    });
+    expect(
+      evidence?.type === "FACE_EVIDENCE" && evidence.observation,
+    ).not.toBeNull();
+  });
+
+  it("posts a null observation and zero raw score for multiple faces", async () => {
+    const instance = prepared();
+    instance.detectForVideo.mockReturnValueOnce({
+      faceLandmarks: [smileMesh(), smileMesh()],
+      faceBlendshapes: blendshape(smileCategories),
+      facialTransformationMatrixes: [],
+    });
+    const { postMessage, runtime } = readyRuntime(instance);
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, image));
+
+    const evidence = postMessage.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === "FACE_EVIDENCE");
+    expect(evidence).toMatchObject({
+      type: "FACE_EVIDENCE",
+      faceCount: 2,
+      guidance: "multiple-faces",
+      eligible: false,
+      observation: null,
+      rawSmileScore: 0,
+    });
+  });
+
+  it("posts a null observation and zero raw score when no face is present", async () => {
+    const instance = prepared();
+    instance.detectForVideo.mockReturnValueOnce({
+      faceLandmarks: [],
+      faceBlendshapes: blendshape(smileCategories),
+      facialTransformationMatrixes: [],
+    });
+    const { postMessage, runtime } = readyRuntime(instance);
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, image));
+
+    const evidence = postMessage.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === "FACE_EVIDENCE");
+    expect(evidence).toMatchObject({
+      type: "FACE_EVIDENCE",
+      faceCount: 0,
+      guidance: "no-face",
+      eligible: false,
+      observation: null,
+      rawSmileScore: 0,
+    });
+  });
+
+  it("posts a zero raw smile score for an invalid coefficient", async () => {
+    const instance = prepared();
+    instance.detectForVideo.mockReturnValueOnce({
+      faceLandmarks: [smileMesh()],
+      faceBlendshapes: blendshape([
+        {
+          categoryName: "mouthSmileLeft",
+          displayName: "",
+          index: 44,
+          score: 2,
+        },
+        {
+          categoryName: "mouthSmileRight",
+          displayName: "",
+          index: 45,
+          score: 0.4,
+        },
+      ]),
+      facialTransformationMatrixes: [],
+    });
+    const { postMessage, runtime } = readyRuntime(instance);
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, image));
+
+    const evidence = postMessage.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === "FACE_EVIDENCE");
+    expect(evidence).toMatchObject({ rawSmileScore: 0 });
+  });
+
+  it("does not post an event for a frame rejected by generation", async () => {
+    const instance = prepared();
+    vi.mocked(prepareVisionRuntime).mockResolvedValue(instance);
+    const { postMessage, runtime } = readyRuntime(instance);
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(3, image));
+
+    expect(image.close).toHaveBeenCalledOnce();
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "FACE_EVIDENCE" }),
     );

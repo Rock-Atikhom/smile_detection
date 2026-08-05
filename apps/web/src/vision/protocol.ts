@@ -67,6 +67,14 @@ export type VisionWorkerEvent =
     }
   | VisionFaceEvidenceEvent;
 
+export type VisionFaceObservation = {
+  centerX: number;
+  centerY: number;
+  width: number;
+  height: number;
+  anchors: [number, number, number, number, number, number, number, number];
+};
+
 export type VisionFaceEvidenceEvent = {
   type: "FACE_EVIDENCE";
   generation: number;
@@ -81,6 +89,8 @@ export type VisionFaceEvidenceEvent = {
   faceCount: 0 | 1 | 2;
   guidance: FaceGuidance;
   eligible: boolean;
+  observation: VisionFaceObservation | null;
+  rawSmileScore: number;
 };
 
 export type VisionCacheCommand =
@@ -212,6 +222,56 @@ function isVisionBitmap(value: unknown): value is ImageBitmap {
     value !== null &&
     typeof (value as { close?: unknown }).close === "function"
   );
+}
+
+function isFiniteInRange(value: unknown, min: number, max: number): boolean {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= min &&
+    value <= max
+  );
+}
+
+type VisionFaceObservationRecord = {
+  centerX?: unknown;
+  centerY?: unknown;
+  width?: unknown;
+  height?: unknown;
+  anchors?: unknown;
+};
+
+function isVisionFaceObservation(value: unknown): boolean {
+  if (
+    !isExactDataObject(value, [
+      "centerX",
+      "centerY",
+      "width",
+      "height",
+      "anchors",
+    ])
+  ) {
+    return false;
+  }
+  const record = value as VisionFaceObservationRecord;
+  if (
+    !isFiniteInRange(record.centerX, 0, 1) ||
+    !isFiniteInRange(record.centerY, 0, 1) ||
+    !isFiniteInRange(record.width, 0, 1) ||
+    !isFiniteInRange(record.height, 0, 1)
+  ) {
+    return false;
+  }
+  const anchors = record.anchors;
+  return (
+    Array.isArray(anchors) &&
+    anchors.length === 8 &&
+    anchors.every((anchor) => isFiniteInRange(anchor, -10, 10))
+  );
+}
+
+function isRawSmileScore(value: unknown): boolean {
+  return isFiniteInRange(value, 0, 1);
 }
 
 function isFaceGuidance(value: unknown): value is FaceGuidance {
@@ -406,6 +466,8 @@ export function isVisionWorkerEvent(
           "faceCount",
           "guidance",
           "eligible",
+          "observation",
+          "rawSmileScore",
         ]) &&
         isVisionGeneration(message.generation) &&
         isVisionGeneration(message.cameraGeneration) &&
@@ -421,7 +483,10 @@ export function isVisionWorkerEvent(
           message.faceCount === 2) &&
         isFaceGuidance(message.guidance) &&
         typeof message.eligible === "boolean" &&
-        message.eligible === (message.guidance === "face-ready")
+        message.eligible === (message.guidance === "face-ready") &&
+        (message.observation === null ||
+          isVisionFaceObservation(message.observation)) &&
+        isRawSmileScore(message.rawSmileScore)
       );
     default:
       return false;
