@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   isVisionServiceWorkerHandshakeCommand,
   isVisionServiceWorkerHandshakeEvent,
@@ -79,6 +79,242 @@ describe("vision service worker handshake guards", () => {
 });
 
 describe("vision worker protocol guards", () => {
+  it("requires an exact non-negative camera generation on frames and evidence", () => {
+    const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
+    const frame = {
+      type: "FRAME",
+      generation: 4,
+      cameraGeneration: 9,
+      sequence: 12,
+      capturedAtMs: 1500,
+      width: 640,
+      height: 360,
+      orientation: "landscape",
+      tier: "standard",
+      bitmap,
+    };
+    const evidence = {
+      type: "FACE_EVIDENCE",
+      generation: 4,
+      cameraGeneration: 9,
+      sequence: 12,
+      capturedAtMs: 1500,
+      completedAtMs: 1540,
+      width: 640,
+      height: 360,
+      orientation: "landscape",
+      tier: "standard",
+      faceCount: 1,
+      guidance: "face-ready",
+      eligible: true,
+    };
+
+    expect(isVisionWorkerCommand(frame)).toBe(true);
+    expect(isVisionWorkerEvent(evidence)).toBe(true);
+    expect(isVisionWorkerCommand({ ...frame, cameraGeneration: -1 })).toBe(
+      false,
+    );
+    expect(isVisionWorkerEvent({ ...evidence, cameraGeneration: 1.5 })).toBe(
+      false,
+    );
+  });
+
+  it("accepts the documented FRAME command and FACE_EVIDENCE event", () => {
+    const bitmap = {
+      close: vi.fn(),
+      height: 360,
+      width: 640,
+    } as unknown as ImageBitmap;
+
+    expect(
+      isVisionWorkerCommand({
+        type: "FRAME",
+        generation: 4,
+        cameraGeneration: 9,
+        sequence: 12,
+        capturedAtMs: 1500,
+        width: 640,
+        height: 360,
+        orientation: "landscape",
+        tier: "standard",
+        bitmap,
+      }),
+    ).toBe(true);
+    expect(
+      isVisionWorkerEvent({
+        type: "FACE_EVIDENCE",
+        generation: 4,
+        cameraGeneration: 9,
+        sequence: 12,
+        capturedAtMs: 1500,
+        completedAtMs: 1540,
+        width: 640,
+        height: 360,
+        orientation: "landscape",
+        tier: "standard",
+        faceCount: 1,
+        guidance: "face-ready",
+        eligible: true,
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      "a fractional sequence",
+      {
+        type: "FRAME",
+        generation: 4,
+        sequence: 12.5,
+        capturedAtMs: 1500,
+        width: 640,
+        height: 360,
+        orientation: "landscape",
+        tier: "standard",
+        bitmap: { close: vi.fn() },
+      },
+      isVisionWorkerCommand,
+    ],
+    [
+      "a non-finite timestamp",
+      {
+        type: "FACE_EVIDENCE",
+        generation: 4,
+        sequence: 12,
+        capturedAtMs: Number.POSITIVE_INFINITY,
+        completedAtMs: 1540,
+        width: 640,
+        height: 360,
+        orientation: "landscape",
+        tier: "standard",
+        faceCount: 1,
+        guidance: "face-ready",
+        eligible: true,
+      },
+      isVisionWorkerEvent,
+    ],
+    [
+      "zero dimensions",
+      {
+        type: "FRAME",
+        generation: 4,
+        sequence: 12,
+        capturedAtMs: 1500,
+        width: 0,
+        height: 360,
+        orientation: "landscape",
+        tier: "standard",
+        bitmap: { close: vi.fn() },
+      },
+      isVisionWorkerCommand,
+    ],
+    [
+      "an invalid orientation",
+      {
+        type: "FRAME",
+        generation: 4,
+        sequence: 12,
+        capturedAtMs: 1500,
+        width: 640,
+        height: 360,
+        orientation: "square",
+        tier: "standard",
+        bitmap: { close: vi.fn() },
+      },
+      isVisionWorkerCommand,
+    ],
+    [
+      "an invalid tier",
+      {
+        type: "FACE_EVIDENCE",
+        generation: 4,
+        sequence: 12,
+        capturedAtMs: 1500,
+        completedAtMs: 1540,
+        width: 640,
+        height: 360,
+        orientation: "landscape",
+        tier: "fast",
+        faceCount: 1,
+        guidance: "face-ready",
+        eligible: true,
+      },
+      isVisionWorkerEvent,
+    ],
+    [
+      "face count 3",
+      {
+        type: "FACE_EVIDENCE",
+        generation: 4,
+        sequence: 12,
+        capturedAtMs: 1500,
+        completedAtMs: 1540,
+        width: 640,
+        height: 360,
+        orientation: "landscape",
+        tier: "standard",
+        faceCount: 3,
+        guidance: "face-ready",
+        eligible: true,
+      },
+      isVisionWorkerEvent,
+    ],
+    [
+      "an eligible guidance mismatch",
+      {
+        type: "FACE_EVIDENCE",
+        generation: 4,
+        sequence: 12,
+        capturedAtMs: 1500,
+        completedAtMs: 1540,
+        width: 640,
+        height: 360,
+        orientation: "landscape",
+        tier: "standard",
+        faceCount: 1,
+        guidance: "too-far",
+        eligible: true,
+      },
+      isVisionWorkerEvent,
+    ],
+    [
+      "a bitmap without close",
+      {
+        type: "FRAME",
+        generation: 4,
+        sequence: 12,
+        capturedAtMs: 1500,
+        width: 640,
+        height: 360,
+        orientation: "landscape",
+        tier: "standard",
+        bitmap: {},
+      },
+      isVisionWorkerCommand,
+    ],
+    [
+      "an extra key",
+      {
+        type: "FACE_EVIDENCE",
+        generation: 4,
+        sequence: 12,
+        capturedAtMs: 1500,
+        completedAtMs: 1540,
+        width: 640,
+        height: 360,
+        orientation: "landscape",
+        tier: "standard",
+        faceCount: 1,
+        guidance: "face-ready",
+        eligible: true,
+        unsafe: true,
+      },
+      isVisionWorkerEvent,
+    ],
+  ])("rejects %s", (_description, message, guard) => {
+    expect(guard(message)).toBe(false);
+  });
+
   it("accepts the documented READY worker event", () => {
     expect(
       isVisionWorkerEvent({

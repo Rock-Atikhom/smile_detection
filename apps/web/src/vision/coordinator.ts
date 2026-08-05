@@ -5,8 +5,11 @@ import {
   type VisionCacheQueryResult,
 } from "../service-worker/client";
 import type { VisionReleaseManifest } from "./manifest";
+import type { FaceGuidance } from "./face-evidence";
 import {
   isVisionWorkerEvent,
+  type VisionFaceEvidenceEvent,
+  type VisionFrameCommand,
   type VisionOfflineState,
   type VisionReason,
   type VisionRuntimeState,
@@ -24,17 +27,40 @@ export interface VisionSnapshot {
   reason: VisionReason | null;
   retryAvailable: boolean;
   phase: "verifying" | "initializing" | null;
+  face: VisionFaceSnapshot;
+}
+
+export interface VisionFaceSnapshot {
+  state: "idle" | "detecting" | "ready" | "error";
+  faceCount: 0 | 1 | 2;
+  guidance: FaceGuidance | null;
+  eligible: boolean;
+  lastSequence: number | null;
+  staleResults: number;
 }
 
 export interface VisionWorkerPort {
-  postMessage(message: VisionWorkerCommand): void;
+  postMessage(message: VisionWorkerCommand, transfer?: Transferable[]): void;
   terminate(): void;
   addEventListener(
     type: "message",
     listener: (event: MessageEvent<unknown>) => void,
   ): void;
+  addEventListener(type: "error", listener: (event: ErrorEvent) => void): void;
+  addEventListener(
+    type: "messageerror",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
   removeEventListener(
     type: "message",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  removeEventListener(
+    type: "error",
+    listener: (event: ErrorEvent) => void,
+  ): void;
+  removeEventListener(
+    type: "messageerror",
     listener: (event: MessageEvent<unknown>) => void,
   ): void;
 }
@@ -45,6 +71,7 @@ export interface VisionCoordinatorDependencies {
   canFetchManifest(manifestUrl: string, signal: AbortSignal): Promise<boolean>;
   manifest: VisionReleaseManifest;
   manifestUrl: string;
+  now(): number;
 }
 
 export type VisionStartResult = "started" | "first-use-offline" | "failed";
@@ -56,10 +83,31 @@ interface ActivePreflight {
 }
 
 interface ActiveWorker {
+  errorListener: (event: ErrorEvent) => void;
   generation: number;
   listener: (event: MessageEvent<unknown>) => void;
+  messageErrorListener: (event: MessageEvent<unknown>) => void;
   port: VisionWorkerPort;
-  settled: boolean;
+  ready: boolean;
+}
+
+interface FrameIdentity {
+  cameraGeneration: number;
+  generation: number;
+  sequence: number;
+}
+
+const IDLE_FACE_SNAPSHOT: Readonly<VisionFaceSnapshot> = Object.freeze({
+  state: "idle",
+  faceCount: 0,
+  guidance: null,
+  eligible: false,
+  lastSequence: null,
+  staleResults: 0,
+});
+
+function idleFaceSnapshot(): VisionFaceSnapshot {
+  return { ...IDLE_FACE_SNAPSHOT };
 }
 
 export function createInitialVisionSnapshot(
@@ -74,6 +122,7 @@ export function createInitialVisionSnapshot(
     reason: null,
     retryAvailable: false,
     phase: null,
+    face: idleFaceSnapshot(),
   });
 }
 
@@ -82,6 +131,9 @@ export class VisionCoordinator {
   private cacheStartedGeneration: number | undefined;
   private activePreflight: ActivePreflight | undefined;
   private activeWorker: ActiveWorker | undefined;
+  private activeCameraGeneration: number | undefined;
+  private inFlightFrame: FrameIdentity | undefined;
+  private pendingFrame: VisionFrameCommand | undefined;
   private disposed = false;
   private readonly listeners = new Set<(snapshot: VisionSnapshot) => void>();
   private snapshotValue: VisionSnapshot;
@@ -132,6 +184,7 @@ export class VisionCoordinator {
       retryAvailable: false,
       runtime: "idle",
       wasmTier: "unknown",
+      face: idleFaceSnapshot(),
     });
     if (!this.ownsGeneration(generation)) return "failed";
     return this.prepare();
@@ -149,6 +202,7 @@ export class VisionCoordinator {
       retryAvailable: true,
       runtime: "idle",
       wasmTier: "unknown",
+      face: idleFaceSnapshot(),
     });
   }
 
@@ -160,6 +214,30 @@ export class VisionCoordinator {
     };
   }
 
+  submitFrame(command: VisionFrameCommand): boolean {
+    const active = this.activeWorker;
+    if (
+      this.disposed ||
+      active === undefined ||
+      !active.ready ||
+      this.snapshotValue.runtime !== "ready" ||
+      command.generation !== this.snapshotValue.generation ||
+      active.generation !== command.generation
+    ) {
+      return false;
+    }
+
+    if (!this.acceptCameraGeneration(command.cameraGeneration)) return false;
+
+    if (this.inFlightFrame === undefined) {
+      return this.transferFrame(active, command, false);
+    }
+
+    this.closePendingFrame();
+    this.pendingFrame = command;
+    return true;
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.invalidateCurrent();
@@ -169,6 +247,7 @@ export class VisionCoordinator {
       phase: null,
       runtime: "idle",
       wasmTier: "unknown",
+      face: idleFaceSnapshot(),
     });
     this.disposed = true;
     this.listeners.clear();
@@ -333,18 +412,26 @@ export class VisionCoordinator {
         phase: null,
         reason: "runtime-initialization-failed",
         retryAvailable: true,
+        face: this.errorFaceSnapshot(),
       });
       return false;
     }
 
     const active: ActiveWorker = {
+      errorListener: (event) => {
+        event.preventDefault();
+        this.receiveWorkerFault(active);
+      },
       generation,
       listener: (event) => this.receiveWorkerEvent(active, event.data),
+      messageErrorListener: () => this.receiveWorkerFault(active),
       port: worker,
-      settled: false,
+      ready: false,
     };
     this.activeWorker = active;
     worker.addEventListener("message", active.listener);
+    worker.addEventListener("error", active.errorListener);
+    worker.addEventListener("messageerror", active.messageErrorListener);
     this.publish({
       offlineCache,
       phase: "verifying",
@@ -352,6 +439,7 @@ export class VisionCoordinator {
       retryAvailable: false,
       runtime: "preparing",
       wasmTier: "unknown",
+      face: idleFaceSnapshot(),
     });
     if (!this.ownsWorker(active)) return false;
 
@@ -369,6 +457,7 @@ export class VisionCoordinator {
         reason: "runtime-initialization-failed",
         retryAvailable: true,
         runtime: "error",
+        face: this.errorFaceSnapshot(),
       });
       return false;
     }
@@ -388,6 +477,7 @@ export class VisionCoordinator {
       retryAvailable: false,
       runtime: "error",
       wasmTier: "unknown",
+      face: this.errorFaceSnapshot(),
     });
   }
 
@@ -406,7 +496,6 @@ export class VisionCoordinator {
       this.disposed ||
       this.activeWorker !== active ||
       active.generation !== this.snapshotValue.generation ||
-      active.settled ||
       !isVisionWorkerEvent(value) ||
       value.generation !== active.generation
     ) {
@@ -414,24 +503,34 @@ export class VisionCoordinator {
     }
 
     if (value.type === "PHASE") {
+      if (active.ready) return;
       this.publish({ phase: value.phase });
       return;
     }
 
     if (value.type === "READY") {
+      if (active.ready) return;
       if (value.releaseId !== this.dependencies.manifest.releaseId) return;
-      active.settled = true;
+      active.ready = true;
       this.publish({
         phase: null,
         reason: null,
         retryAvailable: false,
         runtime: "ready",
         wasmTier: value.wasmTier,
+        face: { ...idleFaceSnapshot(), state: "detecting" },
       });
       return;
     }
 
-    active.settled = true;
+    if (value.type === "FACE_EVIDENCE") {
+      if (!active.ready || this.snapshotValue.runtime !== "ready") return;
+      if (!this.settleFrame(active, value)) return;
+      this.publishFaceEvidence(value);
+      return;
+    }
+
+    this.resetFrameAdmission();
     if (value.code === "runtime-integrity-failed") {
       const preflight = this.activePreflight;
       if (preflight?.generation === active.generation) {
@@ -451,8 +550,22 @@ export class VisionCoordinator {
         value.code === "runtime-integrity-failed" ? false : value.recoverable,
       runtime: "error",
       wasmTier: "unknown",
+      face: this.errorFaceSnapshot(),
     });
     this.closeWorker(active);
+  }
+
+  private receiveWorkerFault(active: ActiveWorker): void {
+    if (!this.ownsWorker(active)) return;
+    this.closeWorker(active);
+    this.publish({
+      phase: null,
+      reason: "runtime-initialization-failed",
+      retryAvailable: true,
+      runtime: "error",
+      wasmTier: "unknown",
+      face: this.errorFaceSnapshot(),
+    });
   }
 
   private invalidateCurrent(): void {
@@ -487,9 +600,151 @@ export class VisionCoordinator {
 
   private closeWorker(active: ActiveWorker): void {
     if (this.activeWorker !== active) return;
+    this.resetFrameAdmission();
     active.port.removeEventListener("message", active.listener);
+    active.port.removeEventListener("error", active.errorListener);
+    active.port.removeEventListener(
+      "messageerror",
+      active.messageErrorListener,
+    );
     active.port.terminate();
     this.activeWorker = undefined;
+  }
+
+  private settleFrame(
+    active: ActiveWorker,
+    value: VisionFaceEvidenceEvent,
+  ): boolean {
+    const inFlight = this.inFlightFrame;
+    if (inFlight === undefined) {
+      if (this.activeCameraGeneration === undefined) {
+        this.activeCameraGeneration = value.cameraGeneration;
+        return true;
+      }
+      return value.cameraGeneration === this.activeCameraGeneration;
+    }
+    if (
+      inFlight.generation !== value.generation ||
+      inFlight.cameraGeneration !== value.cameraGeneration ||
+      inFlight.sequence !== value.sequence
+    ) {
+      return false;
+    }
+    this.inFlightFrame = undefined;
+    const pending = this.pendingFrame;
+    this.pendingFrame = undefined;
+    return pending === undefined || this.transferFrame(active, pending, true);
+  }
+
+  private transferFrame(
+    active: ActiveWorker,
+    command: VisionFrameCommand,
+    coordinatorOwned: boolean,
+  ): boolean {
+    this.inFlightFrame = {
+      cameraGeneration: command.cameraGeneration,
+      generation: command.generation,
+      sequence: command.sequence,
+    };
+    try {
+      active.port.postMessage(command, [command.bitmap]);
+      return true;
+    } catch {
+      if (
+        this.inFlightFrame?.generation === command.generation &&
+        this.inFlightFrame.cameraGeneration === command.cameraGeneration &&
+        this.inFlightFrame.sequence === command.sequence
+      ) {
+        this.inFlightFrame = undefined;
+      }
+      if (coordinatorOwned) this.closeBitmap(command.bitmap);
+      this.closeWorker(active);
+      this.publish({
+        phase: null,
+        reason: "runtime-initialization-failed",
+        retryAvailable: true,
+        runtime: "error",
+        wasmTier: "unknown",
+        face: this.errorFaceSnapshot(),
+      });
+      return false;
+    }
+  }
+
+  private publishFaceEvidence(value: VisionFaceEvidenceEvent): void {
+    if (value.cameraGeneration !== this.activeCameraGeneration) return;
+    const face = this.snapshotValue.face;
+    const ageMs = this.dependencies.now() - value.capturedAtMs;
+    if (
+      !Number.isFinite(ageMs) ||
+      ageMs < 0 ||
+      ageMs > 150 ||
+      (face.lastSequence !== null && value.sequence <= face.lastSequence)
+    ) {
+      this.publish({
+        face: {
+          ...face,
+          staleResults: Math.min(
+            Number.MAX_SAFE_INTEGER,
+            face.staleResults + 1,
+          ),
+        },
+      });
+      return;
+    }
+
+    this.publish({
+      face: {
+        state: "ready",
+        faceCount: value.faceCount,
+        guidance: value.guidance,
+        eligible: value.eligible,
+        lastSequence: value.sequence,
+        staleResults: face.staleResults,
+      },
+    });
+  }
+
+  private errorFaceSnapshot(): VisionFaceSnapshot {
+    return {
+      ...idleFaceSnapshot(),
+      state: "error",
+      staleResults: this.snapshotValue.face.staleResults,
+    };
+  }
+
+  private resetFrameAdmission(): void {
+    this.activeCameraGeneration = undefined;
+    this.inFlightFrame = undefined;
+    this.closePendingFrame();
+  }
+
+  private acceptCameraGeneration(cameraGeneration: number): boolean {
+    if (this.activeCameraGeneration === undefined) {
+      this.activeCameraGeneration = cameraGeneration;
+      return true;
+    }
+    if (cameraGeneration < this.activeCameraGeneration) return false;
+    if (cameraGeneration === this.activeCameraGeneration) return true;
+
+    this.activeCameraGeneration = cameraGeneration;
+    this.closePendingFrame();
+    this.publish({ face: { ...idleFaceSnapshot(), state: "detecting" } });
+    return true;
+  }
+
+  private closePendingFrame(): void {
+    const pending = this.pendingFrame;
+    this.pendingFrame = undefined;
+    if (pending !== undefined) this.closeBitmap(pending.bitmap);
+  }
+
+  private closeBitmap(bitmap: ImageBitmap): void {
+    try {
+      bitmap.close();
+    } catch {
+      // Closing a bitmap is terminal best effort; no data remains referenced.
+    }
   }
 
   private nextGeneration(): number {
@@ -521,6 +776,19 @@ function deferredCacheClient(
 
 const NETWORK_PROBE_PARAMETER = "__vision_network_probe";
 let networkProbeSequence = 0;
+
+type BrowserVisionWorkerFactory = () => VisionWorkerPort;
+
+function createBrowserVisionWorker(): VisionWorkerPort {
+  const factory = (
+    globalThis as typeof globalThis & {
+      __smartSmileCreateVisionWorker?: unknown;
+    }
+  ).__smartSmileCreateVisionWorker;
+  return typeof factory === "function"
+    ? (factory as BrowserVisionWorkerFactory)()
+    : new Worker(new URL("./worker.ts", import.meta.url));
+}
 
 function createNetworkProbeUrl(manifestUrl: string): URL | undefined {
   const url = new URL(manifestUrl, window.location.href);
@@ -560,8 +828,9 @@ export function createBrowserVisionCoordinator(
         return false;
       }
     },
-    createWorker: () => new Worker(new URL("./worker.ts", import.meta.url)),
+    createWorker: createBrowserVisionWorker,
     manifest: VISION_MANIFEST,
     manifestUrl: VISION_MANIFEST_URL,
+    now: () => performance.now(),
   });
 }

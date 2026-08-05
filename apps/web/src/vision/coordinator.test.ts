@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { VisionCacheClient } from "../service-worker/client";
-import type { VisionWorkerCommand, VisionWorkerEvent } from "./protocol";
+import type {
+  VisionFaceEvidenceEvent,
+  VisionFrameCommand,
+  VisionWorkerCommand,
+  VisionWorkerEvent,
+} from "./protocol";
+import { createFaceFramePump } from "./face-frame-pump";
 import { VISION_MANIFEST, VISION_MANIFEST_URL } from "./release";
 import {
   createInitialVisionSnapshot,
@@ -15,37 +21,143 @@ import {
 class FakeWorker implements VisionWorkerPort {
   readonly messages: VisionWorkerCommand[] = [];
   readonly terminate = vi.fn<() => void>();
-  private readonly listeners = new Set<
+  readonly postMessage = vi.fn(
+    (message: VisionWorkerCommand, _transfer?: Transferable[]) => {
+      void _transfer;
+      this.messages.push(message);
+    },
+  );
+  private readonly messageListeners = new Set<
+    (event: MessageEvent<unknown>) => void
+  >();
+  private readonly errorListeners = new Set<(event: ErrorEvent) => void>();
+  private readonly messageErrorListeners = new Set<
     (event: MessageEvent<unknown>) => void
   >();
 
   addEventListener(
-    _type: "message",
+    type: "message",
     listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  addEventListener(type: "error", listener: (event: ErrorEvent) => void): void;
+  addEventListener(
+    type: "messageerror",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  addEventListener(
+    type: "message" | "error" | "messageerror",
+    listener:
+      ((event: MessageEvent<unknown>) => void) | ((event: ErrorEvent) => void),
   ) {
-    this.listeners.add(listener);
+    if (type === "message") {
+      this.messageListeners.add(
+        listener as (event: MessageEvent<unknown>) => void,
+      );
+    } else if (type === "error") {
+      this.errorListeners.add(listener as (event: ErrorEvent) => void);
+    } else {
+      this.messageErrorListeners.add(
+        listener as (event: MessageEvent<unknown>) => void,
+      );
+    }
   }
 
   removeEventListener(
-    _type: "message",
+    type: "message",
     listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  removeEventListener(
+    type: "error",
+    listener: (event: ErrorEvent) => void,
+  ): void;
+  removeEventListener(
+    type: "messageerror",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  removeEventListener(
+    type: "message" | "error" | "messageerror",
+    listener:
+      ((event: MessageEvent<unknown>) => void) | ((event: ErrorEvent) => void),
   ) {
-    this.listeners.delete(listener);
-  }
-
-  postMessage(message: VisionWorkerCommand) {
-    this.messages.push(message);
+    if (type === "message") {
+      this.messageListeners.delete(
+        listener as (event: MessageEvent<unknown>) => void,
+      );
+    } else if (type === "error") {
+      this.errorListeners.delete(listener as (event: ErrorEvent) => void);
+    } else {
+      this.messageErrorListeners.delete(
+        listener as (event: MessageEvent<unknown>) => void,
+      );
+    }
   }
 
   dispatch(data: VisionWorkerEvent | unknown) {
-    for (const listener of this.listeners) {
+    for (const listener of this.messageListeners) {
       listener({ data } as MessageEvent<unknown>);
     }
   }
 
-  get listenerCount() {
-    return this.listeners.size;
+  dispatchEvent(event: ErrorEvent | MessageEvent<unknown>) {
+    const listeners =
+      event.type === "error" ? this.errorListeners : this.messageErrorListeners;
+    for (const listener of listeners) {
+      listener(event as ErrorEvent & MessageEvent<unknown>);
+    }
   }
+
+  get listenerCount() {
+    return (
+      this.messageListeners.size +
+      this.errorListeners.size +
+      this.messageErrorListeners.size
+    );
+  }
+}
+
+function bitmap() {
+  return { close: vi.fn() } as unknown as ImageBitmap;
+}
+
+function frame(
+  sequence: number,
+  generation = 0,
+  image = bitmap(),
+  cameraGeneration = 0,
+): VisionFrameCommand {
+  return {
+    type: "FRAME",
+    generation,
+    cameraGeneration,
+    sequence,
+    capturedAtMs: 900 + sequence,
+    width: 640,
+    height: 360,
+    orientation: "landscape",
+    tier: "standard",
+    bitmap: image,
+  };
+}
+
+function faceEvidence(
+  overrides: Partial<VisionFaceEvidenceEvent> = {},
+): VisionFaceEvidenceEvent {
+  return {
+    type: "FACE_EVIDENCE",
+    generation: 0,
+    cameraGeneration: 0,
+    sequence: 0,
+    capturedAtMs: 900,
+    completedAtMs: 950,
+    width: 640,
+    height: 360,
+    orientation: "landscape",
+    tier: "standard",
+    faceCount: 1,
+    guidance: "face-ready",
+    eligible: true,
+    ...overrides,
+  };
 }
 
 interface CacheControl {
@@ -90,6 +202,7 @@ function createHarness(overrides: Partial<VisionCoordinatorDependencies> = {}) {
     }),
     manifest: VISION_MANIFEST,
     manifestUrl: VISION_MANIFEST_URL,
+    now: () => performance.now(),
     ...overrides,
   };
   const coordinator = new VisionCoordinator(dependencies);
@@ -109,6 +222,18 @@ function createHarness(overrides: Partial<VisionCoordinatorDependencies> = {}) {
   };
 }
 
+async function readyWorker(harness: ReturnType<typeof createHarness>) {
+  await harness.coordinator.prepare();
+  const worker = harness.workers.at(-1)!;
+  worker.dispatch({
+    type: "READY",
+    generation: harness.coordinator.snapshot.generation,
+    releaseId: VISION_MANIFEST.releaseId,
+    wasmTier: "simd",
+  });
+  return worker;
+}
+
 describe("VisionCoordinator", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -124,6 +249,379 @@ describe("VisionCoordinator", () => {
       reason: null,
       retryAvailable: false,
       phase: null,
+      face: {
+        state: "idle",
+        faceCount: 0,
+        guidance: null,
+        eligible: false,
+        lastSequence: null,
+        staleResults: 0,
+      },
+    });
+  });
+
+  it("publishes fresh categorical evidence and rejects evidence aged 201 ms", async () => {
+    let now = 1_050;
+    const harness = createHarness({ now: () => now });
+    const worker = await readyWorker(harness);
+
+    worker.dispatch(faceEvidence({ sequence: 8, capturedAtMs: 900 }));
+    expect(harness.snapshot().face).toEqual({
+      state: "ready",
+      faceCount: 1,
+      guidance: "face-ready",
+      eligible: true,
+      lastSequence: 8,
+      staleResults: 0,
+    });
+
+    now = 1_101;
+    worker.dispatch(faceEvidence({ sequence: 9, capturedAtMs: 900 }));
+    expect(harness.snapshot().face.lastSequence).toBe(8);
+    expect(harness.snapshot().face.staleResults).toBe(1);
+  });
+
+  it("accepts evidence echoed from a submitted frame on the shared monotonic clock", async () => {
+    let now = 1_000;
+    const harness = createHarness({ now: () => now });
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockClear();
+    const pump = createFaceFramePump({
+      capture: vi.fn(async () => bitmap()),
+      now: () => now,
+      submit: (command) => harness.coordinator.submitFrame(command),
+    });
+
+    await expect(
+      pump.tick({
+        generation: 0,
+        cameraGeneration: 3,
+        width: 640,
+        height: 360,
+      }),
+    ).resolves.toBe(true);
+    const submitted = worker.messages.at(-1) as VisionFrameCommand;
+    expect(submitted.capturedAtMs).toBe(1_000);
+
+    now = 1_050;
+    worker.dispatch(
+      faceEvidence({
+        cameraGeneration: submitted.cameraGeneration,
+        capturedAtMs: submitted.capturedAtMs,
+        generation: submitted.generation,
+        guidance: "no-face",
+        eligible: false,
+        faceCount: 0,
+        sequence: submitted.sequence,
+      }),
+    );
+
+    expect(harness.snapshot().face).toMatchObject({
+      guidance: "no-face",
+      lastSequence: 0,
+      staleResults: 0,
+      state: "ready",
+    });
+  });
+
+  it("rejects duplicate, decreasing, future, and wrong-generation evidence", async () => {
+    let now = 1_000;
+    const harness = createHarness({ now: () => now });
+    const worker = await readyWorker(harness);
+    worker.dispatch(faceEvidence({ sequence: 8 }));
+
+    worker.dispatch(
+      faceEvidence({ sequence: 8, guidance: "too-far", eligible: false }),
+    );
+    worker.dispatch(
+      faceEvidence({ sequence: 7, guidance: "too-close", eligible: false }),
+    );
+    now = 899;
+    worker.dispatch(faceEvidence({ sequence: 9, capturedAtMs: 900 }));
+    worker.dispatch(
+      faceEvidence({ generation: 1, sequence: 10, capturedAtMs: 899 }),
+    );
+
+    expect(harness.snapshot().face).toMatchObject({
+      guidance: "face-ready",
+      lastSequence: 8,
+      staleResults: 3,
+    });
+  });
+
+  it("resets face evidence and ignores old events after cancel and restart", async () => {
+    const cancelled = createHarness({ now: () => 1_000 });
+    const cancelledWorker = await readyWorker(cancelled);
+    cancelledWorker.dispatch(faceEvidence({ sequence: 4 }));
+    cancelled.coordinator.cancel();
+    cancelledWorker.dispatch(faceEvidence({ sequence: 5 }));
+    expect(cancelled.snapshot().face).toEqual({
+      state: "idle",
+      faceCount: 0,
+      guidance: null,
+      eligible: false,
+      lastSequence: null,
+      staleResults: 0,
+    });
+
+    const restarted = createHarness({ now: () => 1_000 });
+    const oldWorker = await readyWorker(restarted);
+    oldWorker.dispatch(faceEvidence({ sequence: 4 }));
+    await restarted.coordinator.restart();
+    oldWorker.dispatch(faceEvidence({ sequence: 5 }));
+    expect(restarted.snapshot().face).toEqual({
+      state: "idle",
+      faceCount: 0,
+      guidance: null,
+      eligible: false,
+      lastSequence: null,
+      staleResults: 0,
+    });
+  });
+
+  it("transfers one frame and keeps only the latest pending frame", async () => {
+    const harness = createHarness({ now: () => 1_000 });
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockClear();
+    const a = frame(0);
+    const b = frame(1);
+    const c = frame(2);
+
+    expect(harness.coordinator.submitFrame(a)).toBe(true);
+    expect(worker.postMessage).toHaveBeenCalledWith(a, [a.bitmap]);
+    expect(harness.coordinator.submitFrame(b)).toBe(true);
+    expect(harness.coordinator.submitFrame(c)).toBe(true);
+    expect(b.bitmap.close).toHaveBeenCalledOnce();
+    expect(worker.postMessage).toHaveBeenCalledTimes(1);
+
+    worker.dispatch(faceEvidence({ generation: 1, sequence: 0 }));
+    worker.dispatch(faceEvidence({ sequence: 77 }));
+    expect(worker.postMessage).toHaveBeenCalledTimes(1);
+
+    worker.dispatch(faceEvidence({ sequence: 0 }));
+    expect(worker.postMessage).toHaveBeenCalledWith(c, [c.bitmap]);
+    expect(worker.postMessage).toHaveBeenCalledTimes(2);
+    expect(a.bitmap.close).not.toHaveBeenCalled();
+    expect(c.bitmap.close).not.toHaveBeenCalled();
+  });
+
+  it("settles an in-flight frame before rejecting its stale evidence", async () => {
+    let now = 1_000;
+    const harness = createHarness({ now: () => now });
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockClear();
+    const a = frame(0);
+    const b = frame(1);
+    harness.coordinator.submitFrame(a);
+    harness.coordinator.submitFrame(b);
+
+    now = 1_101;
+    worker.dispatch(faceEvidence({ sequence: 0, capturedAtMs: 900 }));
+
+    expect(worker.postMessage).toHaveBeenLastCalledWith(b, [b.bitmap]);
+    expect(harness.snapshot().face.lastSequence).toBeNull();
+    expect(harness.snapshot().face.staleResults).toBe(1);
+  });
+
+  it("holds a new camera generation until the old in-flight tuple settles", async () => {
+    const harness = createHarness({ now: () => 1_000 });
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockClear();
+    const oldFrame = frame(0);
+    const nextCameraFrame = frame(0, 0, bitmap(), 1);
+
+    expect(harness.coordinator.submitFrame(oldFrame)).toBe(true);
+    expect(harness.coordinator.submitFrame(nextCameraFrame)).toBe(true);
+    worker.dispatch(faceEvidence({ cameraGeneration: 0, sequence: 0 }));
+
+    expect(worker.postMessage).toHaveBeenLastCalledWith(nextCameraFrame, [
+      nextCameraFrame.bitmap,
+    ]);
+    expect(harness.snapshot().face).toMatchObject({
+      state: "detecting",
+      guidance: null,
+      lastSequence: null,
+    });
+  });
+
+  it("closes an older pending frame when a camera generation advances", async () => {
+    const harness = createHarness({ now: () => 1_000 });
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockClear();
+    const oldInFlight = frame(0);
+    const oldPending = frame(1);
+    const nextCameraFrame = frame(0, 0, bitmap(), 1);
+
+    harness.coordinator.submitFrame(oldInFlight);
+    harness.coordinator.submitFrame(oldPending);
+    harness.coordinator.submitFrame(nextCameraFrame);
+
+    expect(oldPending.bitmap.close).toHaveBeenCalledOnce();
+    worker.dispatch(faceEvidence({ cameraGeneration: 0, sequence: 0 }));
+    expect(worker.postMessage).toHaveBeenLastCalledWith(nextCameraFrame, [
+      nextCameraFrame.bitmap,
+    ]);
+  });
+
+  it("does not let a wrong camera tuple release pending ownership", async () => {
+    const harness = createHarness({ now: () => 1_000 });
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockClear();
+    const oldFrame = frame(0);
+    const nextCameraFrame = frame(0, 0, bitmap(), 1);
+
+    harness.coordinator.submitFrame(oldFrame);
+    harness.coordinator.submitFrame(nextCameraFrame);
+    worker.dispatch(faceEvidence({ cameraGeneration: 1, sequence: 0 }));
+
+    expect(worker.postMessage).toHaveBeenCalledTimes(1);
+    expect(harness.snapshot().face).toMatchObject({
+      state: "detecting",
+      guidance: null,
+      lastSequence: null,
+    });
+  });
+
+  it("returns rejected frame ownership before readiness and for a wrong generation", async () => {
+    const harness = createHarness();
+    const beforeReady = frame(0);
+    expect(harness.coordinator.submitFrame(beforeReady)).toBe(false);
+    expect(beforeReady.bitmap.close).not.toHaveBeenCalled();
+
+    await readyWorker(harness);
+    const wrongGeneration = frame(1, 1);
+    expect(harness.coordinator.submitFrame(wrongGeneration)).toBe(false);
+    expect(wrongGeneration.bitmap.close).not.toHaveBeenCalled();
+  });
+
+  it.each(["cancel", "restart", "dispose"] as const)(
+    "closes the pending coordinator-owned frame on %s",
+    async (action) => {
+      const harness = createHarness();
+      await readyWorker(harness);
+      const transferred = frame(0);
+      const pending = frame(1);
+      harness.coordinator.submitFrame(transferred);
+      harness.coordinator.submitFrame(pending);
+
+      if (action === "cancel") harness.coordinator.cancel();
+      if (action === "restart") await harness.coordinator.restart();
+      if (action === "dispose") harness.coordinator.dispose();
+
+      expect(pending.bitmap.close).toHaveBeenCalledOnce();
+      expect(transferred.bitmap.close).not.toHaveBeenCalled();
+    },
+  );
+
+  it("terminates admission and closes pending data on a worker error", async () => {
+    const harness = createHarness();
+    const worker = await readyWorker(harness);
+    const transferred = frame(0);
+    const pending = frame(1);
+    harness.coordinator.submitFrame(transferred);
+    harness.coordinator.submitFrame(pending);
+
+    worker.dispatch({
+      type: "ERROR",
+      generation: 0,
+      code: "runtime-initialization-failed",
+      recoverable: true,
+    });
+
+    expect(pending.bitmap.close).toHaveBeenCalledOnce();
+    expect(transferred.bitmap.close).not.toHaveBeenCalled();
+    expect(harness.snapshot().face.state).toBe("error");
+    const rejected = frame(2);
+    expect(harness.coordinator.submitFrame(rejected)).toBe(false);
+    expect(rejected.bitmap.close).not.toHaveBeenCalled();
+  });
+
+  it.each(["error", "messageerror"] as const)(
+    "fails safely and releases coordinator ownership on native worker %s",
+    async (eventType) => {
+      const harness = createHarness();
+      const worker = await readyWorker(harness);
+      const transferred = frame(0);
+      const pending = frame(1);
+      harness.coordinator.submitFrame(transferred);
+      harness.coordinator.submitFrame(pending);
+
+      worker.dispatchEvent(
+        eventType === "error"
+          ? new ErrorEvent("error", { message: "private worker details" })
+          : new MessageEvent("messageerror", { data: "private payload" }),
+      );
+
+      expect(pending.bitmap.close).toHaveBeenCalledOnce();
+      expect(transferred.bitmap.close).not.toHaveBeenCalled();
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(worker.listenerCount).toBe(0);
+      expect(harness.snapshot()).toMatchObject({
+        runtime: "error",
+        reason: "runtime-initialization-failed",
+        retryAvailable: true,
+        face: { state: "error" },
+      });
+      expect(JSON.stringify(harness.snapshot())).not.toContain("private");
+      expect(harness.coordinator.submitFrame(frame(2))).toBe(false);
+    },
+  );
+
+  it("ignores a stale native worker error after a newer generation starts", async () => {
+    const harness = createHarness();
+    const oldWorker = await readyWorker(harness);
+
+    await harness.coordinator.restart();
+    const currentWorker = harness.workers.at(-1)!;
+    oldWorker.dispatchEvent(
+      new ErrorEvent("error", { message: "late private worker details" }),
+    );
+
+    expect(harness.snapshot()).toMatchObject({
+      generation: 1,
+      runtime: "preparing",
+      reason: null,
+      face: { state: "idle" },
+    });
+    expect(currentWorker.terminate).not.toHaveBeenCalled();
+  });
+
+  it("returns untransferred ownership and terminates admission when postMessage throws", async () => {
+    const harness = createHarness();
+    const worker = await readyWorker(harness);
+    worker.postMessage.mockImplementationOnce(() => {
+      throw new DOMException("clone failed", "DataCloneError");
+    });
+    const command = frame(0);
+
+    expect(harness.coordinator.submitFrame(command)).toBe(false);
+    expect(command.bitmap.close).not.toHaveBeenCalled();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(harness.snapshot()).toMatchObject({
+      runtime: "error",
+      face: { state: "error" },
+    });
+  });
+
+  it("closes an accepted pending frame when its later transfer throws", async () => {
+    const harness = createHarness({ now: () => 1_000 });
+    const worker = await readyWorker(harness);
+    const transferred = frame(0);
+    const pending = frame(1);
+    harness.coordinator.submitFrame(transferred);
+    harness.coordinator.submitFrame(pending);
+    worker.postMessage.mockImplementationOnce(() => {
+      throw new DOMException("clone failed", "DataCloneError");
+    });
+
+    worker.dispatch(faceEvidence({ sequence: 0 }));
+
+    expect(pending.bitmap.close).toHaveBeenCalledOnce();
+    expect(transferred.bitmap.close).not.toHaveBeenCalled();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(harness.snapshot()).toMatchObject({
+      runtime: "error",
+      face: { state: "error" },
     });
   });
 
