@@ -345,6 +345,7 @@ describe("VisionCoordinator", () => {
     expect(harness.snapshot()).toMatchObject({
       generation: 1,
       runtime: "idle",
+      offlineCache: "not-ready",
       reason: "runtime-cancelled",
     });
   });
