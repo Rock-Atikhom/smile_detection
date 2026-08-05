@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyFaceLandmarks } from "./face-evidence";
+import { analyzeFaceLandmarks, classifyFaceLandmarks } from "./face-evidence";
 
 const box = (left: number, top: number, right: number, bottom: number) => [
   { x: left, y: top },
@@ -7,6 +7,28 @@ const box = (left: number, top: number, right: number, bottom: number) => [
   { x: left, y: bottom },
   { x: right, y: bottom },
 ];
+
+const FACE_LANDMARK_COUNT = 478;
+
+function faceMesh(
+  anchors: Record<number, { x: number; y: number }>,
+  extremes?: { left: number; top: number; right: number; bottom: number },
+): { x: number; y: number }[] {
+  const points: { x: number; y: number }[] = [];
+  for (let i = 0; i < FACE_LANDMARK_COUNT; i++) {
+    points.push({ x: 0.5, y: 0.5 });
+  }
+  for (const [index, point] of Object.entries(anchors)) {
+    points[Number(index)] = point;
+  }
+  if (extremes) {
+    points[1] = { x: extremes.left, y: extremes.top };
+    points[2] = { x: extremes.right, y: extremes.top };
+    points[3] = { x: extremes.left, y: extremes.bottom };
+    points[4] = { x: extremes.right, y: extremes.bottom };
+  }
+  return points;
+}
 
 describe("classifyFaceLandmarks", () => {
   it("classifies literal face-guidance boundaries", () => {
@@ -83,5 +105,71 @@ describe("classifyFaceLandmarks", () => {
         box(0.6, 0.2, 0.8, 0.6),
       ]),
     ).toEqual({ eligible: false, faceCount: 2, guidance: "multiple-faces" });
+  });
+});
+
+describe("analyzeFaceLandmarks", () => {
+  const anchors: Record<number, { x: number; y: number }> = {
+    10: { x: 0.5, y: 0.25 },
+    152: { x: 0.5, y: 0.4 },
+    263: { x: 0.4, y: 0.5 },
+    33: { x: 0.6, y: 0.5 },
+  };
+  const mesh = faceMesh(anchors, {
+    left: 0.35,
+    top: 0.25,
+    right: 0.65,
+    bottom: 0.75,
+  });
+
+  it("produces a normalized observation around center by height", () => {
+    const analysis = analyzeFaceLandmarks([mesh]);
+    expect(analysis.observation?.centerX).toBeCloseTo(0.5);
+    expect(analysis.observation?.centerY).toBeCloseTo(0.5);
+    expect(analysis.observation?.width).toBeCloseTo(0.3);
+    expect(analysis.observation?.height).toBeCloseTo(0.5);
+    expect(analysis.observation?.anchors).toHaveLength(8);
+    const expectedAnchors = [0, -0.5, 0, -0.2, -0.2, 0, 0.2, 0];
+    analysis.observation?.anchors.forEach((value, index) => {
+      expect(value).toBeCloseTo(expectedAnchors[index] ?? 0);
+    });
+  });
+
+  it("keeps classifyFaceLandmarks public output unchanged", () => {
+    expect(classifyFaceLandmarks([mesh])).toEqual({
+      eligible: true,
+      faceCount: 1,
+      guidance: "face-ready",
+    });
+  });
+
+  it("returns no observation for empty, short, non-finite, or zero-height landmarks", () => {
+    expect(analyzeFaceLandmarks([]).observation).toBeUndefined();
+
+    const short = faceMesh(anchors, {
+      left: 0.35,
+      top: 0.25,
+      right: 0.65,
+      bottom: 0.75,
+    }).slice(0, 100);
+    expect(analyzeFaceLandmarks([short]).observation).toBeUndefined();
+
+    const nonFinite = faceMesh(anchors, {
+      left: 0.35,
+      top: 0.25,
+      right: 0.65,
+      bottom: 0.75,
+    });
+    nonFinite[10] = { x: Number.NaN, y: 0.5 };
+    expect(analyzeFaceLandmarks([nonFinite]).observation).toBeUndefined();
+
+    const zeroHeight = faceMesh(anchors, {
+      left: 0.35,
+      top: 0.25,
+      right: 0.65,
+      bottom: 0.75,
+    });
+    for (const point of zeroHeight) point.y = 0.5;
+    expect(analyzeFaceLandmarks([zeroHeight]).observation).toBeUndefined();
   });
 });
