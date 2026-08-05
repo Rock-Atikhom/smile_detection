@@ -130,8 +130,8 @@ test("initializes the real release, commits an allowlisted cache, and reopens of
       timeout: 60_000,
     });
     await expect(
-      page.getByRole("heading", { name: "Camera ready" }),
-    ).toBeVisible();
+      page.getByRole("status", { name: "Camera status" }),
+    ).toContainText("Smart Smile is ready for offline use");
 
     await page.getByRole("button", { name: "Help & system status" }).click();
     const help = page.getByRole("dialog", { name: "Help & system status" });
@@ -237,8 +237,10 @@ test("initializes the real release, commits an allowlisted cache, and reopens of
       .getByRole("button", { name: "Continue to camera" })
       .click();
     await expect(
-      offlinePage.getByRole("heading", { name: "Camera ready" }),
-    ).toBeVisible({ timeout: 30_000 });
+      offlinePage.getByRole("status", { name: "Camera status" }),
+    ).toContainText("Smart Smile is ready for offline use", {
+      timeout: 30_000,
+    });
     await expect(
       offlinePage.getByRole("heading", {
         name: "Connect once to finish setup",
@@ -303,11 +305,10 @@ test("initializes only after cache completion and consumes cached verified WASM"
     await page.getByRole("button", { name: "Continue to camera" }).click();
 
     await expect(
-      page.getByRole("heading", { name: "Camera ready" }),
-    ).toBeVisible({ timeout: 60_000 });
-    await expect(
       page.getByRole("status", { name: "Camera status" }),
-    ).toContainText("Smart Smile is ready for offline use");
+    ).toContainText("Smart Smile is ready for offline use", {
+      timeout: 60_000,
+    });
     await expect
       .poll(() => corruptAfterFirstWasmStatus(page))
       .toEqual({ simdWasmRequests: 1 });
@@ -407,8 +408,10 @@ test("deletes an offline corrupt completed cache and blocks camera", async ({
     await page.goto("/");
     await page.getByRole("button", { name: "Continue to camera" }).click();
     await expect(
-      page.getByRole("heading", { name: "Camera ready" }),
-    ).toBeVisible({ timeout: 60_000 });
+      page.getByRole("status", { name: "Camera status" }),
+    ).toContainText("Smart Smile is ready for offline use", {
+      timeout: 60_000,
+    });
     await page.getByRole("button", { name: "Stop camera" }).click();
     await page.evaluate(
       async ({ assetPath, cacheName }) => {
