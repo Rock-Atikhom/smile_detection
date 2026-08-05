@@ -10,11 +10,14 @@ import {
 import type { CameraRecoveryReason, CameraSnapshot } from "./camera/session";
 import { useCameraSession } from "./camera/useCameraSession";
 import type { VisionSnapshot } from "./vision/coordinator";
+import type { ContinuityState } from "./vision/face-continuity";
 import type { FaceGuidance } from "./vision/face-evidence";
 import {
   createBrowserFaceFramePump,
   type FaceFramePump,
 } from "./vision/face-frame-pump";
+import { DEFAULT_SMILE_PROFILE } from "./vision/smile-score";
+import type { VerificationPhase } from "./vision/smile-verification";
 import { useVisionRuntime } from "./vision/useVisionRuntime";
 
 type Copy = { action?: string; heading: string; text: string };
@@ -27,6 +30,22 @@ const faceGuidanceCopy: Record<FaceGuidance, string> = {
   "off-center": "Center your face",
   "face-ready": "Face ready",
 };
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function statusFor(input: {
+  face: FaceGuidance;
+  continuity: ContinuityState;
+  phase: VerificationPhase;
+}): string {
+  if (input.face !== "face-ready") return faceGuidanceCopy[input.face];
+  if (input.continuity === "empty") return faceGuidanceCopy["face-ready"];
+  if (input.continuity === "candidate") return "Hold still";
+  if (input.phase === "complete") return "Smile verified";
+  if (input.phase === "verifying" || input.phase === "paused") {
+    return "Keep smiling";
+  }
+  return "Smile when you are ready";
+}
 
 const errorCopy: Record<CameraRecoveryReason, Copy> = {
   "aborted-request": {
@@ -298,6 +317,46 @@ function SystemStatus({
             <dt>WASM tier</dt>
             <dd>{wasmTierLabel}</dd>
           </div>
+          <div>
+            <dt>Raw smile aggregate</dt>
+            <dd>
+              {runtimeSnapshot.verification.rawScore === null
+                ? "Not available"
+                : runtimeSnapshot.verification.rawScore.toFixed(2)}
+            </dd>
+          </div>
+          <div>
+            <dt>Smoothed smile aggregate</dt>
+            <dd>
+              {runtimeSnapshot.verification.smoothedScore === null
+                ? "Not available"
+                : runtimeSnapshot.verification.smoothedScore.toFixed(2)}
+            </dd>
+          </div>
+          <div>
+            <dt>High threshold</dt>
+            <dd>{DEFAULT_SMILE_PROFILE.highThreshold.toFixed(2)}</dd>
+          </div>
+          <div>
+            <dt>Low threshold</dt>
+            <dd>{DEFAULT_SMILE_PROFILE.lowThreshold.toFixed(2)}</dd>
+          </div>
+          <div>
+            <dt>Smile state</dt>
+            <dd>{runtimeSnapshot.verification.phase}</dd>
+          </div>
+          <div>
+            <dt>Continuity</dt>
+            <dd>{runtimeSnapshot.continuity.state}</dd>
+          </div>
+          <div>
+            <dt>Grace Window</dt>
+            <dd>
+              {runtimeSnapshot.verification.graceRemainingMs === null
+                ? "Not available"
+                : String(runtimeSnapshot.verification.graceRemainingMs)}
+            </dd>
+          </div>
         </dl>
       </NativeDialog>
     </Dialog.Root>
@@ -532,6 +591,26 @@ export default function App() {
     vision.snapshot.face.state === "ready"
       ? vision.snapshot.face.guidance
       : null;
+  const smileStatus =
+    faceGuidance !== null
+      ? statusFor({
+          face: faceGuidance,
+          continuity: vision.snapshot.continuity.state,
+          phase: vision.snapshot.verification.phase,
+        })
+      : null;
+  const smileProgress = {
+    phase: vision.snapshot.verification.phase,
+    max: DEFAULT_SMILE_PROFILE.verificationMs,
+    progressMs: vision.snapshot.verification.progressMs,
+    progressRatio: vision.snapshot.verification.progressRatio,
+  };
+  const smileProgressLabel =
+    smileProgress.phase === "complete"
+      ? "Smile verification complete"
+      : smileProgress.phase === "paused"
+        ? "Smile progress paused"
+        : "Building smile progress";
   useEffect(() => {
     if (
       snapshot.state !== "ready" ||
@@ -798,7 +877,7 @@ export default function App() {
                         ref={recoveryHeadingRef}
                         tabIndex={-1}
                       >
-                        {copy.heading}
+                        {smileStatus ?? copy.heading}
                       </h1>
                       {offlineAnnouncement && (
                         <span className="visually-hidden">
@@ -807,6 +886,34 @@ export default function App() {
                       )}
                     </div>
                     <p className="visually-hidden">{copy.text}</p>
+                    {smileProgress.phase === "verifying" ||
+                    smileProgress.phase === "paused" ||
+                    smileProgress.phase === "complete" ? (
+                      <div className="smile-progress">
+                        <progress
+                          aria-label="Smile verification progress"
+                          className="smile-progress__native"
+                          max={smileProgress.max}
+                          value={smileProgress.progressMs}
+                        />
+                        <div
+                          aria-hidden="true"
+                          className="smile-progress__track"
+                        >
+                          <div
+                            className="smile-progress__fill"
+                            style={{
+                              width: `${Math.round(
+                                smileProgress.progressRatio * 100,
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                        <span className="smile-progress__label">
+                          {smileProgressLabel}
+                        </span>
+                      </div>
+                    ) : null}
                     <div className="session-controls">
                       <button
                         className="session-control session-control--stop"

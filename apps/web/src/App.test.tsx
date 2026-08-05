@@ -12,7 +12,7 @@ import {
   CAMERA_ATTACHMENT_TIMEOUT_MS,
   CAMERA_WARMUP_MS,
 } from "./camera/session";
-import App from "./App";
+import App, { statusFor } from "./App";
 
 const vision = vi.hoisted(() => ({
   cancel: vi.fn(),
@@ -34,6 +34,29 @@ const vision = vi.hoisted(() => ({
       lastSequence: null as number | null,
       staleResults: 0,
       state: "idle" as "idle" | "detecting" | "ready" | "error",
+    },
+    continuity: {
+      consecutiveMatches: 0,
+      reason: "none" as
+        | "none"
+        | "warming"
+        | "no-face"
+        | "multiple-faces"
+        | "position"
+        | "nonmatch"
+        | "expired",
+      state: "empty" as "empty" | "candidate" | "ready" | "grace",
+    },
+    verification: {
+      graceRemainingMs: null as number | null,
+      phase: "waiting" as "waiting" | "verifying" | "paused" | "complete",
+      progressMs: 0,
+      progressRatio: 0,
+      rawScore: null as number | null,
+      reason: "none" as
+        "none" | "warming" | "face-invalid" | "continuity-lost" | "smile-lost",
+      smileValid: false,
+      smoothedScore: null as number | null,
     },
     generation: 1,
     offlineCache: "ready" as "not-ready" | "caching" | "ready" | "error",
@@ -98,6 +121,21 @@ function resetVision() {
       lastSequence: null,
       staleResults: 0,
       state: "idle",
+    },
+    continuity: {
+      consecutiveMatches: 0,
+      reason: "none",
+      state: "empty",
+    },
+    verification: {
+      graceRemainingMs: null,
+      phase: "waiting",
+      progressMs: 0,
+      progressRatio: 0,
+      rawScore: null,
+      reason: "none",
+      smileValid: false,
+      smoothedScore: null,
     },
     generation: 1,
     offlineCache: "ready",
@@ -1252,5 +1290,278 @@ describe("Smart Smile camera session", () => {
     });
     rerender(<App />);
     expect(screen.getByRole("heading", { name: "Camera ready" })).toBeVisible();
+  });
+  describe("Smile progress and diagnostics", () => {
+    const faceReady = {
+      face: { ...readyFace, guidance: "face-ready", eligible: true },
+    };
+
+    function setSmile(opts: {
+      continuity?: "empty" | "candidate" | "ready" | "grace";
+      phase?: "waiting" | "verifying" | "paused" | "complete";
+      progressMs?: number;
+      rawScore?: number | null;
+      smoothedScore?: number | null;
+      reason?: string;
+      graceRemainingMs?: number | null;
+      smileValid?: boolean;
+    }) {
+      Object.assign(vision.snapshot, {
+        face: faceReady.face,
+        continuity: {
+          consecutiveMatches: 3,
+          reason: "none",
+          state: opts.continuity ?? "ready",
+        },
+        verification: {
+          graceRemainingMs: opts.graceRemainingMs ?? null,
+          phase: opts.phase ?? "waiting",
+          progressMs: opts.progressMs ?? 0,
+          progressRatio: (opts.progressMs ?? 0) / 5000,
+          rawScore: opts.rawScore ?? null,
+          reason: opts.reason ?? "none",
+          smileValid: opts.smileValid ?? false,
+          smoothedScore: opts.smoothedScore ?? null,
+        },
+      });
+    }
+
+    it.each([
+      [
+        "candidate",
+        { face: "face-ready", continuity: "candidate", phase: "waiting" },
+        "Hold still",
+      ],
+      [
+        "waiting",
+        { face: "face-ready", continuity: "ready", phase: "waiting" },
+        "Smile when you are ready",
+      ],
+      [
+        "verifying",
+        { face: "face-ready", continuity: "ready", phase: "verifying" },
+        "Keep smiling",
+      ],
+      [
+        "paused",
+        { face: "face-ready", continuity: "ready", phase: "paused" },
+        "Keep smiling",
+      ],
+      [
+        "complete",
+        { face: "face-ready", continuity: "ready", phase: "complete" },
+        "Smile verified",
+      ],
+    ] as const)(
+      "statusFor maps %s to its participant copy",
+      (_, args, text) => {
+        expect(
+          statusFor({
+            face: args.face,
+            continuity: args.continuity,
+            phase: args.phase,
+          }),
+        ).toBe(text);
+      },
+    );
+
+    it("shows an initial relaxed status before any verification", () => {
+      expect(
+        statusFor({
+          face: "face-ready",
+          continuity: "empty",
+          phase: "waiting",
+        }),
+      ).toBe("Face ready");
+    });
+
+    it("maps idle visions away from smile status", () => {
+      expect(
+        statusFor({ face: "no-face", continuity: "empty", phase: "waiting" }),
+      ).toBe("Show your face");
+    });
+
+    it("renders qualitative progress in the live overlay without raw scores", async () => {
+      vi.useFakeTimers();
+      const view = await makeCameraReadyForFrames();
+      setSmile({ continuity: "ready", phase: "verifying", progressMs: 1250 });
+      view.rerender(<App />);
+
+      const status = screen.getByRole("status", { name: "Camera status" });
+      expect(status).toHaveTextContent("Keep smiling");
+      expect(status).not.toHaveTextContent(/\d+\.\d+/);
+      expect(status).not.toHaveTextContent(/1250/);
+
+      const progress = screen.getByRole("progressbar", {
+        name: "Smile verification progress",
+      });
+      expect(progress).toHaveAttribute("max", "5000");
+      expect(Number(progress.getAttribute("value"))).toBe(1250);
+      expect(
+        screen.getByText(
+          /Building smile progress|Smile progress paused|Smile verification complete/,
+        ),
+      ).toBeVisible();
+    });
+
+    it("renders a paused progress bar during the smile-lost grace window", async () => {
+      vi.useFakeTimers();
+      const view = await makeCameraReadyForFrames();
+      setSmile({
+        continuity: "ready",
+        phase: "paused",
+        reason: "smile-lost",
+        progressMs: 1250,
+      });
+      view.rerender(<App />);
+
+      const progress = screen.getByRole("progressbar", {
+        name: "Smile verification progress",
+      });
+      expect(progress).toHaveAttribute("value", "1250");
+      expect(
+        screen.getByText(
+          /Building smile progress|Smile progress paused|Smile verification complete/,
+        ),
+      ).toBeVisible();
+    });
+
+    it("renders the completed progress bar after verification", async () => {
+      vi.useFakeTimers();
+      const view = await makeCameraReadyForFrames();
+      setSmile({
+        continuity: "ready",
+        phase: "complete",
+        progressMs: 5000,
+      });
+      view.rerender(<App />);
+
+      const progress = screen.getByRole("progressbar", {
+        name: "Smile verification progress",
+      });
+      expect(progress).toHaveAttribute("max", "5000");
+      expect(progress).toHaveAttribute("value", "5000");
+      expect(screen.getByText("Smile verification complete")).toBeVisible();
+      expect(
+        screen.getByRole("status", { name: "Camera status" }),
+      ).not.toHaveTextContent(/\d+\.\d+/);
+    });
+
+    it("places progress between the status and the controls in the overlay", async () => {
+      vi.useFakeTimers();
+      const view = await makeCameraReadyForFrames();
+      setSmile({ continuity: "ready", phase: "verifying", progressMs: 2500 });
+      view.rerender(<App />);
+
+      const overlay = screen.getByRole("region", {
+        name: "Live camera controls",
+      });
+      const status = within(overlay).getByRole("status");
+      const progress = within(overlay).getByRole("progressbar", {
+        name: "Smile verification progress",
+      });
+      const stop = within(overlay).getByRole("button", { name: "Stop camera" });
+      expect(
+        status.compareDocumentPosition(progress) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        progress.compareDocumentPosition(stop) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("renders current smile diagnostics in the Help drawer with two decimal places", async () => {
+      vi.useFakeTimers();
+      const view = await makeCameraReadyForFrames();
+      setSmile({
+        continuity: "ready",
+        phase: "verifying",
+        progressMs: 2000,
+        rawScore: 0.6123456,
+        smoothedScore: 0.5987654,
+        graceRemainingMs: 150,
+      });
+      view.rerender(<App />);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Help & system status" }),
+      );
+      const dialog = screen.getByRole("dialog", {
+        name: "Help & system status",
+      });
+      expect(dialog).toHaveTextContent("Raw smile aggregate0.61");
+      expect(dialog).toHaveTextContent("Smoothed smile aggregate0.60");
+      expect(dialog).toHaveTextContent("High threshold0.60");
+      expect(dialog).toHaveTextContent("Low threshold0.45");
+      expect(dialog).toHaveTextContent("Smile stateverifying");
+      expect(dialog).toHaveTextContent("Continuityready");
+      expect(dialog).toHaveTextContent("Grace Window150");
+      expect(dialog).not.toHaveTextContent("0.6123456");
+    });
+
+    it("renders Not available before smile evidence exists", async () => {
+      vi.useFakeTimers();
+      const view = await makeCameraReadyForFrames();
+      view.rerender(<App />);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Help & system status" }),
+      );
+      const dialog = screen.getByRole("dialog", {
+        name: "Help & system status",
+      });
+      const raw = within(dialog)
+        .getByText("Raw smile aggregate")
+        .closest("div");
+      const smoothed = within(dialog)
+        .getByText("Smoothed smile aggregate")
+        .closest("div");
+      expect(raw).toHaveTextContent("Not available");
+      expect(smoothed).toHaveTextContent("Not available");
+    });
+
+    it("keeps diagnostics to the current instant with no event or time series", async () => {
+      vi.useFakeTimers();
+      const view = await makeCameraReadyForFrames();
+      setSmile({
+        continuity: "candidate",
+        phase: "waiting",
+        rawScore: 0.42,
+        smoothedScore: 0.4,
+      });
+      view.rerender(<App />);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Help & system status" }),
+      );
+      const dialog = screen.getByRole("dialog", {
+        name: "Help & system status",
+      });
+      expect(dialog).toHaveTextContent("Raw smile aggregate0.42");
+      dialog.contains(
+        screen.getByRole("button", { name: "Close system status" }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Close system status" }),
+      );
+
+      setSmile({
+        continuity: "ready",
+        phase: "verifying",
+        progressMs: 1000,
+        rawScore: 0.66,
+        smoothedScore: 0.64,
+      });
+      view.rerender(<App />);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Help & system status" }),
+      );
+      const dialog2 = screen.getByRole("dialog", {
+        name: "Help & system status",
+      });
+      expect(dialog2).toHaveTextContent("Raw smile aggregate0.66");
+      expect(dialog2).toHaveTextContent("Smoothed smile aggregate0.64");
+      expect(dialog2).not.toHaveTextContent("Raw smile aggregate0.42");
+      expect(dialog2).not.toHaveTextContent("Smoothed smile aggregate0.40");
+    });
   });
 });
