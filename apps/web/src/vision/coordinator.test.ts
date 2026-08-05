@@ -162,6 +162,70 @@ function faceEvidence(
   };
 }
 
+const MATCHING_OBSERVATION: NonNullable<
+  VisionFaceEvidenceEvent["observation"]
+> = {
+  centerX: 0.5,
+  centerY: 0.5,
+  width: 0.3,
+  height: 0.5,
+  anchors: [0.04, -0.08, 0.16, -0.08, -0.04, -0.02, 0.08, 0.06],
+};
+
+function freshEvidence(
+  sequence: number,
+  capturedAtMs: number,
+  overrides: Partial<VisionFaceEvidenceEvent> = {},
+): VisionFaceEvidenceEvent {
+  return faceEvidence({
+    sequence,
+    capturedAtMs,
+    guidance: "face-ready",
+    eligible: true,
+    faceCount: 1,
+    observation: MATCHING_OBSERVATION,
+    rawSmileScore: 1,
+    ...overrides,
+  });
+}
+
+const IDLE_CONTINUITY = {
+  state: "empty" as const,
+  reason: "none" as const,
+  consecutiveMatches: 0,
+};
+
+const IDLE_VERIFICATION = {
+  phase: "waiting" as const,
+  reason: "warming" as const,
+  rawScore: null,
+  smoothedScore: null,
+  smileValid: false,
+  progressMs: 0,
+  progressRatio: 0,
+  graceRemainingMs: null,
+};
+
+async function continuousHarness(
+  overrides: Partial<VisionCoordinatorDependencies> = {},
+) {
+  const clock = { now: 1_000 };
+  const harness = createHarness({ now: () => clock.now, ...overrides });
+  const worker = await readyWorker(harness);
+  return { ...harness, clock, worker };
+}
+
+function buildProgressWorkers(
+  workers: FakeWorker[],
+  clock: { now: number },
+): void {
+  const worker = workers.at(-1)!;
+  for (let i = 0; i < 8; i += 1) {
+    worker.dispatch(freshEvidence(i, clock.now));
+    clock.now += 40;
+  }
+}
+
 interface CacheControl {
   cacheState:
     | ((state: "caching" | "ready" | "error" | "integrity-failed") => void)
@@ -251,6 +315,8 @@ describe("VisionCoordinator", () => {
       reason: null,
       retryAvailable: false,
       phase: null,
+      continuity: IDLE_CONTINUITY,
+      verification: IDLE_VERIFICATION,
       face: {
         state: "idle",
         faceCount: 0,
@@ -1401,5 +1467,226 @@ describe("VisionCoordinator", () => {
       },
     ]);
     coordinator.dispose();
+  });
+
+  describe("continuity and verification state", () => {
+    it("warms candidate 1 and 2 then reaches ready on three fresh matches", async () => {
+      const { clock, snapshot, worker } = await continuousHarness();
+
+      worker.dispatch(freshEvidence(0, clock.now));
+      expect(snapshot().continuity).toEqual({
+        state: "candidate",
+        reason: "warming",
+        consecutiveMatches: 1,
+      });
+
+      clock.now += 40;
+      worker.dispatch(freshEvidence(1, clock.now));
+      expect(snapshot().continuity).toEqual({
+        state: "candidate",
+        reason: "warming",
+        consecutiveMatches: 2,
+      });
+
+      clock.now += 40;
+      worker.dispatch(freshEvidence(2, clock.now));
+      expect(snapshot().continuity).toEqual({
+        state: "ready",
+        reason: "none",
+        consecutiveMatches: 3,
+      });
+    });
+
+    it("exposes smoothed score and verification progress only for accepted evidence", async () => {
+      const { clock, snapshot, worker } = await continuousHarness();
+
+      worker.dispatch(freshEvidence(0, clock.now));
+      expect(snapshot().verification).toMatchObject({
+        phase: "waiting",
+        rawScore: 1,
+        smileValid: false,
+        progressMs: 0,
+        progressRatio: 0,
+      });
+
+      clock.now += 40;
+      worker.dispatch(freshEvidence(1, clock.now));
+      clock.now += 40;
+      worker.dispatch(freshEvidence(2, clock.now));
+      clock.now += 40;
+      worker.dispatch(freshEvidence(3, clock.now));
+      clock.now += 40;
+      worker.dispatch(freshEvidence(4, clock.now));
+      clock.now += 40;
+      worker.dispatch(freshEvidence(5, clock.now));
+
+      expect(snapshot().continuity.state).toBe("ready");
+      expect(snapshot().verification.smileValid).toBe(true);
+      expect(snapshot().verification.phase).toBe("verifying");
+      expect(snapshot().verification.reason).toBe("none");
+      expect(snapshot().verification.progressMs).toBeGreaterThan(0);
+      expect(snapshot().verification.progressRatio).toBe(
+        snapshot().verification.progressMs / 5_000,
+      );
+    });
+
+    it("never copies observation or anchor fields into either snapshot", async () => {
+      const { clock, coordinator, snapshot, worker } =
+        await continuousHarness();
+      worker.dispatch(freshEvidence(0, clock.now));
+      clock.now += 40;
+      worker.dispatch(freshEvidence(1, clock.now));
+      clock.now += 40;
+      worker.dispatch(freshEvidence(2, clock.now));
+      expect(JSON.stringify(snapshot().continuity)).not.toContain("anchor");
+      expect(JSON.stringify(snapshot().verification)).not.toContain("anchor");
+      void coordinator;
+    });
+
+    it.each([
+      ["old runtime generation", (s: number) => ({ generation: s + 1 })],
+      ["old camera generation", (s: number) => ({ cameraGeneration: s + 1 })],
+    ] as const)(
+      "rejects stale %s without altering semantic state",
+      async (_label, buildOverride) => {
+        const { clock, coordinator, snapshot, worker } =
+          await continuousHarness();
+        worker.dispatch(freshEvidence(0, clock.now));
+        clock.now += 40;
+        worker.dispatch(freshEvidence(1, clock.now));
+        clock.now += 40;
+        worker.dispatch(freshEvidence(2, clock.now));
+        const continuity = snapshot().continuity;
+        const verification = snapshot().verification;
+
+        worker.dispatch(
+          freshEvidence(3, clock.now, buildOverride(snapshot().generation)),
+        );
+
+        expect(snapshot().continuity).toEqual(continuity);
+        expect(snapshot().verification).toEqual(verification);
+        void coordinator;
+      },
+    );
+
+    it("rejects duplicate and decreasing sequences without altering semantic state", async () => {
+      const { clock, snapshot, worker } = await continuousHarness();
+      worker.dispatch(freshEvidence(0, clock.now));
+      clock.now += 40;
+      worker.dispatch(freshEvidence(1, clock.now));
+      clock.now += 40;
+      worker.dispatch(freshEvidence(2, clock.now));
+      const continuity = snapshot().continuity;
+      const verification = snapshot().verification;
+
+      clock.now += 40;
+      worker.dispatch(freshEvidence(2, clock.now));
+      worker.dispatch(freshEvidence(1, clock.now + 1));
+
+      expect(snapshot().continuity).toEqual(continuity);
+      expect(snapshot().verification).toEqual(verification);
+    });
+
+    it("rejects evidence aged 151 ms without altering semantic state", async () => {
+      const { clock, snapshot, worker } = await continuousHarness();
+      worker.dispatch(freshEvidence(0, clock.now));
+      clock.now += 40;
+      worker.dispatch(freshEvidence(1, clock.now));
+      clock.now += 40;
+      worker.dispatch(freshEvidence(2, clock.now));
+      const continuity = snapshot().continuity;
+      const verification = snapshot().verification;
+
+      worker.dispatch(freshEvidence(3, clock.now - 151));
+
+      expect(snapshot().continuity).toEqual(continuity);
+      expect(snapshot().verification).toEqual(verification);
+    });
+
+    it("clears continuity and verification on cancel", async () => {
+      const { clock, coordinator, snapshot, workers } =
+        await continuousHarness();
+      buildProgressWorkers(workers, clock);
+      expect(snapshot().verification.progressMs).toBeGreaterThan(0);
+
+      coordinator.cancel();
+
+      expect(snapshot().continuity).toEqual(IDLE_CONTINUITY);
+      expect(snapshot().verification).toEqual(IDLE_VERIFICATION);
+    });
+
+    it("clears continuity and verification on restart", async () => {
+      const { clock, coordinator, snapshot, workers } =
+        await continuousHarness();
+      buildProgressWorkers(workers, clock);
+      expect(snapshot().verification.progressMs).toBeGreaterThan(0);
+
+      await coordinator.restart();
+
+      expect(snapshot().continuity).toEqual(IDLE_CONTINUITY);
+      expect(snapshot().verification).toEqual(IDLE_VERIFICATION);
+    });
+
+    it("clears continuity and verification on a newer camera generation", async () => {
+      const { clock, coordinator, snapshot, workers } =
+        await continuousHarness();
+      buildProgressWorkers(workers, clock);
+      expect(snapshot().verification.progressMs).toBeGreaterThan(0);
+
+      const pump = createFaceFramePump({
+        capture: async () => bitmap(),
+        now: () => clock.now,
+        submit: (command) => coordinator.submitFrame(command),
+      });
+      await pump.tick({
+        generation: snapshot().generation,
+        cameraGeneration: 1,
+        width: 640,
+        height: 360,
+      });
+
+      expect(snapshot().continuity).toEqual(IDLE_CONTINUITY);
+      expect(snapshot().verification).toEqual(IDLE_VERIFICATION);
+    });
+
+    it.each(["error", "messageerror", "protocol-error"] as const)(
+      "clears continuity and verification on worker %s",
+      async (faultType) => {
+        const { clock, snapshot, workers } = await continuousHarness();
+        const worker = workers.at(-1)!;
+        buildProgressWorkers(workers, clock);
+        expect(snapshot().verification.progressMs).toBeGreaterThan(0);
+
+        if (faultType === "error") {
+          worker.dispatchEvent(new ErrorEvent("error", { message: "private" }));
+        } else if (faultType === "messageerror") {
+          worker.dispatchEvent(
+            new MessageEvent("messageerror", { data: "private" }),
+          );
+        } else {
+          worker.dispatch({
+            type: "ERROR",
+            generation: snapshot().generation,
+            code: "runtime-initialization-failed",
+            recoverable: true,
+          });
+        }
+
+        expect(snapshot().continuity).toEqual(IDLE_CONTINUITY);
+        expect(snapshot().verification).toEqual(IDLE_VERIFICATION);
+      },
+    );
+
+    it("clears continuity and verification on dispose", async () => {
+      const { clock, coordinator, snapshot, workers } =
+        await continuousHarness();
+      buildProgressWorkers(workers, clock);
+      expect(snapshot().verification.progressMs).toBeGreaterThan(0);
+
+      coordinator.dispose();
+
+      expect(coordinator.snapshot.continuity).toEqual(IDLE_CONTINUITY);
+      expect(coordinator.snapshot.verification).toEqual(IDLE_VERIFICATION);
+    });
   });
 });

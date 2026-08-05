@@ -279,7 +279,7 @@ describe("Smart Smile camera session", () => {
     expect(status).toHaveTextContent("Smart Smile could not start safely");
   });
 
-  it("submits ready frames at a 100 ms cadence with separate runtime and camera generations", async () => {
+  it("submits ready frames at a 50 ms cadence with separate runtime and camera generations", async () => {
     vi.useFakeTimers();
     let monotonicNow = 1_000;
     vi.spyOn(performance, "now").mockImplementation(() => monotonicNow);
@@ -298,9 +298,9 @@ describe("Smart Smile camera session", () => {
         sequence: 0,
       }),
     );
-    await vi.advanceTimersByTimeAsync(99);
+    await vi.advanceTimersByTimeAsync(49);
     expect(vision.submitFrame).toHaveBeenCalledTimes(1);
-    monotonicNow = 1_100;
+    monotonicNow = 1_050;
     await vi.advanceTimersByTimeAsync(1);
     expect(vision.submitFrame).toHaveBeenCalledTimes(2);
     expect(createImageBitmap).toHaveBeenCalledTimes(2);

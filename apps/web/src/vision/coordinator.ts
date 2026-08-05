@@ -5,7 +5,19 @@ import {
   type VisionCacheQueryResult,
 } from "../service-worker/client";
 import type { VisionReleaseManifest } from "./manifest";
-import type { FaceGuidance } from "./face-evidence";
+import type { FaceGuidance, NormalizedFaceObservation } from "./face-evidence";
+import { createFaceContinuityTracker } from "./face-continuity";
+import type { ContinuityReason, ContinuityState } from "./face-continuity";
+import {
+  advanceSmileVerification,
+  createSmileVerificationState,
+} from "./smile-verification";
+import type {
+  SmileVerificationState,
+  VerificationPhase,
+  VerificationReason,
+} from "./smile-verification";
+import { DEFAULT_SMILE_PROFILE } from "./smile-score";
 import {
   isVisionWorkerEvent,
   type VisionFaceEvidenceEvent,
@@ -28,6 +40,25 @@ export interface VisionSnapshot {
   retryAvailable: boolean;
   phase: "verifying" | "initializing" | null;
   face: VisionFaceSnapshot;
+  continuity: VisionContinuitySnapshot;
+  verification: VisionVerificationSnapshot;
+}
+
+export interface VisionContinuitySnapshot {
+  state: ContinuityState;
+  reason: ContinuityReason;
+  consecutiveMatches: number;
+}
+
+export interface VisionVerificationSnapshot {
+  phase: VerificationPhase;
+  reason: VerificationReason;
+  rawScore: number | null;
+  smoothedScore: number | null;
+  smileValid: boolean;
+  progressMs: number;
+  progressRatio: number;
+  graceRemainingMs: number | null;
 }
 
 export interface VisionFaceSnapshot {
@@ -97,6 +128,39 @@ interface FrameIdentity {
   sequence: number;
 }
 
+const CENTER_PAD = 0.03;
+const MIN_WIDTH = 0.18;
+const MIN_HEIGHT = 0.3;
+const MAX_HEIGHT = 0.8;
+
+function deriveEligible(observation: NormalizedFaceObservation | null): {
+  initialEligible: boolean;
+  tolerantEligible: boolean;
+} {
+  if (observation === null) {
+    return { initialEligible: false, tolerantEligible: false };
+  }
+  const { centerX, centerY, width, height } = observation;
+  const sizingOk =
+    width >= MIN_WIDTH && height >= MIN_HEIGHT && height <= MAX_HEIGHT;
+  const frameOk =
+    centerX - width / 2 >= 0 &&
+    centerX + width / 2 <= 1 &&
+    centerY - height / 2 >= 0 &&
+    centerY + height / 2 <= 1;
+  const centered =
+    centerX >= 0.23 && centerX <= 0.77 && centerY >= 0.16 && centerY <= 0.78;
+  const tolerant =
+    centerX >= 0.23 - CENTER_PAD &&
+    centerX <= 0.77 + CENTER_PAD &&
+    centerY >= 0.16 - CENTER_PAD &&
+    centerY <= 0.78 + CENTER_PAD;
+  return {
+    initialEligible: sizingOk && frameOk && centered,
+    tolerantEligible: sizingOk && frameOk && tolerant,
+  };
+}
+
 const IDLE_FACE_SNAPSHOT: Readonly<VisionFaceSnapshot> = Object.freeze({
   state: "idle",
   faceCount: 0,
@@ -106,8 +170,62 @@ const IDLE_FACE_SNAPSHOT: Readonly<VisionFaceSnapshot> = Object.freeze({
   staleResults: 0,
 });
 
+const IDLE_CONTINUITY: Readonly<VisionContinuitySnapshot> = Object.freeze({
+  state: "empty",
+  reason: "none",
+  consecutiveMatches: 0,
+});
+
+const IDLE_VERIFICATION: Readonly<VisionVerificationSnapshot> = Object.freeze({
+  phase: "waiting",
+  reason: "warming",
+  rawScore: null,
+  smoothedScore: null,
+  smileValid: false,
+  progressMs: 0,
+  progressRatio: 0,
+  graceRemainingMs: null,
+});
+
 function idleFaceSnapshot(): VisionFaceSnapshot {
   return { ...IDLE_FACE_SNAPSHOT };
+}
+
+function idleContinuitySnapshot(): VisionContinuitySnapshot {
+  return { ...IDLE_CONTINUITY };
+}
+
+function idleVerificationSnapshot(): VisionVerificationSnapshot {
+  return { ...IDLE_VERIFICATION };
+}
+
+function verificationSnapshotOf(
+  state: SmileVerificationState,
+  rawScore: number | null,
+): VisionVerificationSnapshot {
+  const progressRatio = Math.min(
+    1,
+    Math.max(0, state.progressMs / DEFAULT_SMILE_PROFILE.verificationMs),
+  );
+  let graceRemainingMs: number | null = null;
+  if (state.invalidSinceMs !== null && state.phase === "paused") {
+    const elapsedSinceInvalid =
+      (state.lastCapturedAtMs ?? state.invalidSinceMs) - state.invalidSinceMs;
+    graceRemainingMs = Math.max(
+      0,
+      DEFAULT_SMILE_PROFILE.graceMs - elapsedSinceInvalid,
+    );
+  }
+  return {
+    phase: state.phase,
+    reason: state.reason,
+    rawScore,
+    smoothedScore: state.filter.smoothedScore,
+    smileValid: state.filter.smileValid,
+    progressMs: state.progressMs,
+    progressRatio,
+    graceRemainingMs,
+  };
 }
 
 export function createInitialVisionSnapshot(
@@ -123,6 +241,8 @@ export function createInitialVisionSnapshot(
     retryAvailable: false,
     phase: null,
     face: idleFaceSnapshot(),
+    continuity: idleContinuitySnapshot(),
+    verification: idleVerificationSnapshot(),
   });
 }
 
@@ -134,6 +254,9 @@ export class VisionCoordinator {
   private activeCameraGeneration: number | undefined;
   private inFlightFrame: FrameIdentity | undefined;
   private pendingFrame: VisionFrameCommand | undefined;
+  private tracker = createFaceContinuityTracker();
+  private verificationState = createSmileVerificationState();
+  private lastRawScore: number | null = null;
   private disposed = false;
   private readonly listeners = new Set<(snapshot: VisionSnapshot) => void>();
   private snapshotValue: VisionSnapshot;
@@ -174,6 +297,7 @@ export class VisionCoordinator {
   async restart(): Promise<VisionStartResult> {
     if (this.disposed) return "failed";
     this.invalidateCurrent();
+    this.resetSemanticState();
     const generation = this.nextGeneration();
     this.publish({
       generation,
@@ -185,6 +309,8 @@ export class VisionCoordinator {
       runtime: "idle",
       wasmTier: "unknown",
       face: idleFaceSnapshot(),
+      continuity: idleContinuitySnapshot(),
+      verification: idleVerificationSnapshot(),
     });
     if (!this.ownsGeneration(generation)) return "failed";
     return this.prepare();
@@ -193,6 +319,7 @@ export class VisionCoordinator {
   cancel(): void {
     if (this.disposed) return;
     this.invalidateCurrent();
+    this.resetSemanticState();
     this.publish({
       generation: this.nextGeneration(),
       offlineCache:
@@ -203,6 +330,8 @@ export class VisionCoordinator {
       runtime: "idle",
       wasmTier: "unknown",
       face: idleFaceSnapshot(),
+      continuity: idleContinuitySnapshot(),
+      verification: idleVerificationSnapshot(),
     });
   }
 
@@ -241,6 +370,7 @@ export class VisionCoordinator {
   dispose(): void {
     if (this.disposed) return;
     this.invalidateCurrent();
+    this.resetSemanticState();
     this.snapshotValue = Object.freeze({
       ...this.snapshotValue,
       generation: this.nextGeneration(),
@@ -248,6 +378,8 @@ export class VisionCoordinator {
       runtime: "idle",
       wasmTier: "unknown",
       face: idleFaceSnapshot(),
+      continuity: idleContinuitySnapshot(),
+      verification: idleVerificationSnapshot(),
     });
     this.disposed = true;
     this.listeners.clear();
@@ -413,6 +545,8 @@ export class VisionCoordinator {
         reason: "runtime-initialization-failed",
         retryAvailable: true,
         face: this.errorFaceSnapshot(),
+        continuity: idleContinuitySnapshot(),
+        verification: idleVerificationSnapshot(),
       });
       return false;
     }
@@ -458,6 +592,8 @@ export class VisionCoordinator {
         retryAvailable: true,
         runtime: "error",
         face: this.errorFaceSnapshot(),
+        continuity: idleContinuitySnapshot(),
+        verification: idleVerificationSnapshot(),
       });
       return false;
     }
@@ -478,6 +614,8 @@ export class VisionCoordinator {
       runtime: "error",
       wasmTier: "unknown",
       face: this.errorFaceSnapshot(),
+      continuity: idleContinuitySnapshot(),
+      verification: idleVerificationSnapshot(),
     });
   }
 
@@ -551,6 +689,8 @@ export class VisionCoordinator {
       runtime: "error",
       wasmTier: "unknown",
       face: this.errorFaceSnapshot(),
+      continuity: idleContinuitySnapshot(),
+      verification: idleVerificationSnapshot(),
     });
     this.closeWorker(active);
   }
@@ -565,6 +705,8 @@ export class VisionCoordinator {
       runtime: "error",
       wasmTier: "unknown",
       face: this.errorFaceSnapshot(),
+      continuity: idleContinuitySnapshot(),
+      verification: idleVerificationSnapshot(),
     });
   }
 
@@ -601,6 +743,7 @@ export class VisionCoordinator {
   private closeWorker(active: ActiveWorker): void {
     if (this.activeWorker !== active) return;
     this.resetFrameAdmission();
+    this.resetSemanticState();
     active.port.removeEventListener("message", active.listener);
     active.port.removeEventListener("error", active.errorListener);
     active.port.removeEventListener(
@@ -666,6 +809,8 @@ export class VisionCoordinator {
         runtime: "error",
         wasmTier: "unknown",
         face: this.errorFaceSnapshot(),
+        continuity: idleContinuitySnapshot(),
+        verification: idleVerificationSnapshot(),
       });
       return false;
     }
@@ -693,6 +838,26 @@ export class VisionCoordinator {
       return;
     }
 
+    const { initialEligible, tolerantEligible } = deriveEligible(
+      value.observation,
+    );
+    const continuityResult = this.tracker.update({
+      timestamp: value.capturedAtMs,
+      observation: value.observation ?? undefined,
+      initialEligible,
+      tolerantEligible,
+      faceCount: value.faceCount,
+      guidance: value.guidance,
+    });
+    this.verificationState = advanceSmileVerification(this.verificationState, {
+      capturedAtMs: value.capturedAtMs,
+      rawScore: value.rawSmileScore,
+      continuity: continuityResult.state,
+      faceEligible: value.eligible,
+      continuityReset: continuityResult.reset,
+    });
+    this.lastRawScore = value.rawSmileScore;
+
     this.publish({
       face: {
         state: "ready",
@@ -702,6 +867,15 @@ export class VisionCoordinator {
         lastSequence: value.sequence,
         staleResults: face.staleResults,
       },
+      continuity: {
+        state: continuityResult.state,
+        reason: continuityResult.reason,
+        consecutiveMatches: continuityResult.consecutiveMatches,
+      },
+      verification: verificationSnapshotOf(
+        this.verificationState,
+        this.lastRawScore,
+      ),
     });
   }
 
@@ -711,6 +885,12 @@ export class VisionCoordinator {
       state: "error",
       staleResults: this.snapshotValue.face.staleResults,
     };
+  }
+
+  private resetSemanticState(): void {
+    this.tracker = createFaceContinuityTracker();
+    this.verificationState = createSmileVerificationState();
+    this.lastRawScore = null;
   }
 
   private resetFrameAdmission(): void {
@@ -729,7 +909,12 @@ export class VisionCoordinator {
 
     this.activeCameraGeneration = cameraGeneration;
     this.closePendingFrame();
-    this.publish({ face: { ...idleFaceSnapshot(), state: "detecting" } });
+    this.resetSemanticState();
+    this.publish({
+      face: { ...idleFaceSnapshot(), state: "detecting" },
+      continuity: idleContinuitySnapshot(),
+      verification: idleVerificationSnapshot(),
+    });
     return true;
   }
 

@@ -559,7 +559,7 @@ export default function App() {
     const schedule = () => {
       if (!active) return;
       const currentTimeMs = monotonicNow();
-      if (currentTimeMs - lastCaptureAtMs >= 100) {
+      if (currentTimeMs - lastCaptureAtMs >= 50) {
         lastCaptureAtMs = currentTimeMs;
         void pump.tick({
           generation: vision.snapshot.generation,
@@ -568,7 +568,7 @@ export default function App() {
           width,
         });
       }
-      faceFrameTimerRef.current = setTimeout(schedule, 100);
+      faceFrameTimerRef.current = setTimeout(schedule, 50);
     };
     schedule();
 
