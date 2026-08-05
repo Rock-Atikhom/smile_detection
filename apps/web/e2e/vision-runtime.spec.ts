@@ -25,8 +25,13 @@ const shellPaths = [
   .sort();
 const currentCacheName = `smart-smile-vision-${releaseManifest.releaseId}`;
 const corruptWasmCookieName = "__smart_smile_e2e_corrupt_wasm";
+const corruptAfterFirstWasmCookieName =
+  "__smart_smile_e2e_corrupt_after_first_wasm";
 const simdWasmPath = releaseManifest.assets.find(({ path }) =>
   path.endsWith("/vision_wasm_internal.wasm"),
+)!.path;
+const nonRuntimeAssetPath = releaseManifest.assets.find(({ path }) =>
+  path.endsWith(".pdf"),
 )!.path;
 const completionPath = (releaseId: string) =>
   `/__smart-smile/vision-complete/${releaseId}`;
@@ -55,6 +60,25 @@ async function setCorruptWasm(page: Page, enabled: boolean) {
   } else {
     expect(faultCookies).toEqual([]);
   }
+}
+
+async function setCorruptAfterFirstWasm(page: Page, enabled: boolean) {
+  const response = await page.request.get(
+    `/__e2e__/fault/corrupt-wasm-after-first/${enabled ? "on" : "off"}`,
+  );
+  expect(response.status()).toBe(204);
+  const faultCookies = (await page.context().cookies()).filter(
+    ({ name }) => name === corruptAfterFirstWasmCookieName,
+  );
+  expect(faultCookies).toHaveLength(enabled ? 1 : 0);
+}
+
+async function corruptAfterFirstWasmStatus(page: Page) {
+  const response = await page.request.get(
+    "/__e2e__/fault/corrupt-wasm-after-first/status",
+  );
+  expect(response.status()).toBe(200);
+  return (await response.json()) as { simdWasmRequests: number };
 }
 
 async function controlCorruptWasmBarrier(
@@ -106,8 +130,8 @@ test("initializes the real release, commits an allowlisted cache, and reopens of
       timeout: 60_000,
     });
     await expect(
-      page.getByRole("heading", { name: "Camera ready" }),
-    ).toBeVisible();
+      page.getByRole("status", { name: "Camera status" }),
+    ).toContainText("Smart Smile is ready for offline use");
 
     await page.getByRole("button", { name: "Help & system status" }).click();
     const help = page.getByRole("dialog", { name: "Help & system status" });
@@ -213,8 +237,10 @@ test("initializes the real release, commits an allowlisted cache, and reopens of
       .getByRole("button", { name: "Continue to camera" })
       .click();
     await expect(
-      offlinePage.getByRole("heading", { name: "Camera ready" }),
-    ).toBeVisible({ timeout: 30_000 });
+      offlinePage.getByRole("status", { name: "Camera status" }),
+    ).toContainText("Smart Smile is ready for offline use", {
+      timeout: 30_000,
+    });
     await expect(
       offlinePage.getByRole("heading", {
         name: "Connect once to finish setup",
@@ -268,6 +294,161 @@ test("shows focused first-use-offline recovery without requesting camera", async
   }
 });
 
+test("initializes only after cache completion and consumes cached verified WASM", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await page.goto("/");
+    await setCorruptAfterFirstWasm(page, true);
+    await page.getByRole("button", { name: "Continue to camera" }).click();
+
+    await expect(
+      page.getByRole("status", { name: "Camera status" }),
+    ).toContainText("Smart Smile is ready for offline use", {
+      timeout: 60_000,
+    });
+    await expect
+      .poll(() => corruptAfterFirstWasmStatus(page))
+      .toEqual({ simdWasmRequests: 1 });
+  } finally {
+    try {
+      await setCorruptAfterFirstWasm(page, false);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test("fails closed before worker or camera when Cache Storage cannot commit", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    window.visionCameraRequests = 0;
+    window.visionWorkerCreations = 0;
+    const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
+      navigator.mediaDevices,
+    );
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+      window.visionCameraRequests += 1;
+      return originalGetUserMedia(constraints);
+    };
+    window.Worker = new Proxy(window.Worker, {
+      construct(target, argumentsList) {
+        window.visionWorkerCreations += 1;
+        return Reflect.construct(target, argumentsList);
+      },
+    });
+  });
+  const page = await context.newPage();
+  const devtools = await context.newCDPSession(page);
+  let origin: string | undefined;
+  try {
+    await page.goto("/");
+    await waitForShellWorker(page);
+    origin = new URL(page.url()).origin;
+    const quota = await devtools.send("Storage.getUsageAndQuota", { origin });
+    await devtools.send("Storage.overrideQuotaForOrigin", {
+      origin,
+      quotaSize: quota.usage,
+    });
+
+    await page.getByRole("button", { name: "Continue to camera" }).click();
+
+    const heading = page.getByRole("heading", {
+      name: "Smile detection setup needs attention",
+    });
+    await expect(heading).toBeVisible({ timeout: 30_000 });
+    await expect(heading).toBeFocused();
+    await expect(
+      page.getByRole("button", { name: "Try setup again" }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => ({
+        cameraRequests: window.visionCameraRequests,
+        workerCreations: window.visionWorkerCreations,
+      })),
+    ).toEqual({ cameraRequests: 0, workerCreations: 0 });
+    await expect(page.locator("video")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (cacheName) => caches.keys().then((keys) => keys.includes(cacheName)),
+          currentCacheName,
+        ),
+      )
+      .toBe(false);
+  } finally {
+    if (origin !== undefined) {
+      await devtools.send("Storage.overrideQuotaForOrigin", { origin });
+    }
+    await context.close();
+  }
+});
+
+test("deletes an offline corrupt completed cache and blocks camera", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    window.visionCameraRequests = 0;
+    const original = navigator.mediaDevices.getUserMedia.bind(
+      navigator.mediaDevices,
+    );
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+      window.visionCameraRequests += 1;
+      return original(constraints);
+    };
+  });
+  let page = await context.newPage();
+  const serviceWorkerDevtools = await context.newCDPSession(page);
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Continue to camera" }).click();
+    await expect(
+      page.getByRole("status", { name: "Camera status" }),
+    ).toContainText("Smart Smile is ready for offline use", {
+      timeout: 60_000,
+    });
+    await page.getByRole("button", { name: "Stop camera" }).click();
+    await page.evaluate(
+      async ({ assetPath, cacheName }) => {
+        const cache = await caches.open(cacheName);
+        await cache.put(assetPath, new Response("corrupt model card"));
+      },
+      { assetPath: nonRuntimeAssetPath, cacheName: currentCacheName },
+    );
+
+    await context.setOffline(true);
+    await serviceWorkerDevtools.send("ServiceWorker.enable");
+    await serviceWorkerDevtools.send("ServiceWorker.stopAllWorkers");
+    await page.close();
+    page = await context.newPage();
+    await page.goto("/");
+    await page.getByRole("button", { name: "Continue to camera" }).click();
+
+    const heading = page.getByRole("heading", {
+      name: "Smart Smile could not start safely",
+    });
+    await expect(heading).toBeVisible({ timeout: 30_000 });
+    await expect(heading).toBeFocused();
+    expect(await page.evaluate(() => window.visionCameraRequests)).toBe(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (cacheName) => caches.keys().then((keys) => keys.includes(cacheName)),
+          currentCacheName,
+        ),
+      )
+      .toBe(false);
+  } finally {
+    await context.setOffline(false);
+    await context.close();
+  }
+});
+
 test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
   browser,
 }) => {
@@ -275,10 +456,12 @@ test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
   const cleanContext = await browser.newContext();
   await context.addInitScript(() => {
     window.visionCameraTracks = [];
+    window.visionCameraRequests = 0;
     const original = navigator.mediaDevices.getUserMedia.bind(
       navigator.mediaDevices,
     );
     navigator.mediaDevices.getUserMedia = async (constraints) => {
+      window.visionCameraRequests += 1;
       const stream = await original(constraints);
       window.visionCameraTracks.push(...stream.getVideoTracks());
       return stream;
@@ -347,17 +530,8 @@ test("rejects corrupt WASM without a baseline retry or unsafe residue", async ({
     await expect(
       page.getByRole("status", { name: "Camera status" }),
     ).not.toContainText("Smart Smile is ready for offline use");
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            window.visionCameraTracks.length > 0 &&
-            window.visionCameraTracks.every(
-              (track) => track.readyState === "ended",
-            ),
-        ),
-      )
-      .toBe(true);
+    expect(await page.evaluate(() => window.visionCameraRequests)).toBe(0);
+    expect(await page.evaluate(() => window.visionCameraTracks.length)).toBe(0);
     const baselinePaths = releaseManifest.assets
       .filter(
         ({ path }) =>
@@ -616,5 +790,6 @@ declare global {
     visionCameraRequests: number;
     visionCameraTracks: MediaStreamTrack[];
     visionCspViolations: string[];
+    visionWorkerCreations: number;
   }
 }

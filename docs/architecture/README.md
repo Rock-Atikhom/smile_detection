@@ -46,7 +46,7 @@ including generated release-manifest metadata, but no vendored vision release
 files. After **Continue to camera**, the service worker opens a separate
 versioned cache and fetches every manifest allowlisted asset from the same
 origin. It validates HTTP success, byte count, and SHA-256, stores verified
-responses, reads every required response back, and writes its completion marker
+responses, reads every manifest response back, and writes its completion marker
 last. Only a matching cache with that marker and successful readback is usable;
 cancellation, a failed download, or an integrity failure deletes the incomplete
 new cache while preserving a previously complete release.
@@ -57,3 +57,47 @@ complete matching release initializes from cache after a close/reopen. An
 integrity mismatch blocks initialization, removes affected unverified or
 incomplete cache content, stops the camera, and presents safe recovery rather
 than raw runtime details.
+
+The service worker claims the current page before runtime preparation, and the
+cache client sends commands only to that controlling worker. The coordinator
+constructs the classic vision worker only after the complete release cache has
+been verified and committed. Immutable vision fetches then have no network
+fallback: MediaPipe 0.10.35's loader-script and WASM URL requests are served as
+freshly verified copies from that completed cache.
+
+A missing completion marker remains the recoverable first-use state. Once a
+marker exists, an invalid marker or a missing/corrupt entry anywhere in the
+manifest deletes the whole release cache and enters fatal integrity recovery.
+If Cache Storage cannot commit a first release, setup fails closed before worker
+creation or camera permission and offers a bounded retry instead of running from
+unverifiable URL refetches.
+
+## Ticket 04 worker face-evidence boundary
+
+Ticket 04 sends an aspect-preserving `ImageBitmap` frame directly from the
+main-thread frame pump to the already prepared dedicated worker. The coordinator
+admits one running frame plus one latest pending frame, closes replaced and
+processed bitmaps, and binds every frame and result to distinct runtime
+`generation` and camera `cameraGeneration` values, sequence, capture time,
+dimensions, orientation, and the standard inference tier. It rejects stale,
+duplicate, out-of-order, and wrong-generation or wrong-camera-generation
+results before React can observe them.
+
+The worker alone runs Face Landmarker VIDEO inference and immediately reduces
+its result to categorical evidence: a capped face count, one of no face,
+multiple faces, move back, move closer, center your face, or face ready, and
+an eligibility boolean. React receives only that participant-safe categorical
+snapshot through the coordinator; it never receives a frame, MediaPipe object,
+landmarks, blendshapes, boxes, geometry, coordinates, or a smile score. The
+application uses no participant dataset and does no custom model training.
+Smile Score remains Ticket 05 work.
+
+The browser coordinator has one optional Worker factory read only at worker
+construction. Production uses the bundled worker. Playwright installs the
+factory before navigation to supply deterministic protocol events with exact
+current runtime and camera tuples; it exposes no participant data and provides
+no UI control in the application.
+
+Ticket 04 does not remove the Ticket 03 first-load browser race: it remains a
+release blocker. A completed-cache close/reopen is valid only for development
+demonstration and manual testing preparation until Ticket 03 is resolved.

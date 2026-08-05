@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  VISION_ASSET_ERROR_HEADER,
   verifyVisionResponse,
   VisionAssetError,
   type VisionAsset,
@@ -63,5 +64,44 @@ describe("verifyVisionResponse", () => {
       assetId: asset.id,
       code: "runtime-download-failed",
     });
+  });
+
+  it("does not trust a spoofed runtime-route marker without trusted context", async () => {
+    const response = new Response(null, {
+      headers: { [VISION_ASSET_ERROR_HEADER]: "offline-cache-failed" },
+      status: 503,
+    });
+
+    await expect(verifyVisionResponse(response, asset)).rejects.toMatchObject({
+      assetId: asset.id,
+      code: "runtime-download-failed",
+    });
+  });
+
+  it("reports response body read failures as a safe operational cache failure", async () => {
+    const response = new Response(bytes);
+    vi.spyOn(response, "arrayBuffer").mockRejectedValue(
+      new Error("private browser cache failure"),
+    );
+    const pending = verifyVisionResponse(response, asset);
+
+    await expect(pending).rejects.toMatchObject({
+      assetId: asset.id,
+      code: "offline-cache-failed",
+    });
+    await expect(pending).rejects.not.toThrow("private browser cache failure");
+  });
+
+  it("reports digest API failures as a safe operational cache failure", async () => {
+    vi.spyOn(crypto.subtle, "digest").mockRejectedValueOnce(
+      new Error("private digest failure"),
+    );
+    const pending = verifyVisionResponse(new Response(bytes), asset);
+
+    await expect(pending).rejects.toMatchObject({
+      assetId: asset.id,
+      code: "offline-cache-failed",
+    });
+    await expect(pending).rejects.not.toThrow("private digest failure");
   });
 });

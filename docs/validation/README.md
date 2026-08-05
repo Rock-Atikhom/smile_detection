@@ -58,3 +58,10 @@ The vendoring command is for an intentional reviewed refresh; the manifest check
 must pass before shipping. For named physical-browser acceptance, use online preparation followed by airplane-mode close/reopen: online, select **Continue to camera** and wait until both runtime and offline use report ready; close the browser page; enable airplane mode; reopen the page; select **Continue to camera**; then confirm **Camera ready** without a network request. Record only the privacy-safe fields in [the Ticket 03 device matrix](ticket-03-device-matrix.md).
 Do not record camera content, device identifiers, landmarks, geometry, scores,
 or participant information.
+
+Production-browser acceptance also corrupts a non-runtime model-card entry in a
+completed release before offline reopen and verifies whole-cache deletion, fatal
+focused recovery, and zero camera requests. A separate first-install fault turns
+network WASM corrupt after its first cache-population response; successful
+initialization with one server request proves MediaPipe consumes the completed
+verified cache rather than refetching executable bytes from the network.

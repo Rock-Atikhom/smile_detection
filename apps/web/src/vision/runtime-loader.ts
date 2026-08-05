@@ -1,13 +1,20 @@
 import { FaceLandmarker } from "@mediapipe/tasks-vision";
 import type { FaceLandmarkerOptions } from "@mediapipe/tasks-vision";
-import { verifyVisionResponse, VisionAssetError } from "./integrity";
+import {
+  verifyVisionResponse,
+  VisionAssetError,
+  VisionAssetOperationalError,
+} from "./integrity";
 import {
   getAssetByRole,
   parseVisionManifest,
+  visionManifestsEqual,
   type VisionAsset,
   type VisionAssetRole,
+  type VisionReleaseManifest,
 } from "./manifest";
 import type { VisionReason } from "./protocol";
+import { VISION_MANIFEST } from "./release";
 
 type WasmFileset = Parameters<typeof FaceLandmarker.createFromOptions>[0];
 type RuntimeFailureCode = Extract<
@@ -16,16 +23,19 @@ type RuntimeFailureCode = Extract<
   | "runtime-integrity-failed"
   | "runtime-initialization-failed"
   | "runtime-cancelled"
+  | "offline-cache-failed"
 >;
 type WasmTier = "simd" | "baseline";
+type PreparedLandmarker = Pick<FaceLandmarker, "close" | "detectForVideo">;
 
 export interface VisionRuntimeDependencies {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  manifest: VisionReleaseManifest;
   supportsSimd(): boolean;
   createLandmarker(
     fileset: WasmFileset,
     options: FaceLandmarkerOptions,
-  ): Promise<Pick<FaceLandmarker, "close">>;
+  ): Promise<PreparedLandmarker>;
 }
 
 export interface PrepareVisionRuntimeInput {
@@ -37,6 +47,10 @@ export interface PrepareVisionRuntimeInput {
 
 export interface PreparedVisionRuntime {
   wasmTier: WasmTier;
+  detectForVideo(
+    frame: ImageBitmap,
+    timestampMs: number,
+  ): ReturnType<PreparedLandmarker["detectForVideo"]>;
   close(): void;
 }
 
@@ -73,7 +87,7 @@ function throwIfCancelled(signal: AbortSignal): void {
   }
 }
 
-function closeLandmarker(landmarker: Pick<FaceLandmarker, "close">): void {
+function closeLandmarker(landmarker: PreparedLandmarker): void {
   try {
     landmarker.close();
   } catch {
@@ -106,6 +120,9 @@ async function loadManifest(
   input: PrepareVisionRuntimeInput,
   dependencies: VisionRuntimeDependencies,
 ) {
+  if (input.releaseId !== dependencies.manifest.releaseId) {
+    throw new VisionRuntimeError("runtime-integrity-failed");
+  }
   const response = await fetchResponse(
     input.manifestUrl,
     input.signal,
@@ -116,10 +133,25 @@ async function loadManifest(
     throw new VisionRuntimeError("runtime-download-failed");
   }
 
+  let manifestValue: unknown;
   try {
-    const manifest = parseVisionManifest(await response.json());
+    manifestValue = await response.json();
+  } catch (error) {
     throwIfCancelled(input.signal);
-    if (manifest.releaseId !== input.releaseId) {
+    throw new VisionRuntimeError(
+      error instanceof SyntaxError
+        ? "runtime-integrity-failed"
+        : "offline-cache-failed",
+    );
+  }
+
+  try {
+    const manifest = parseVisionManifest(manifestValue);
+    throwIfCancelled(input.signal);
+    if (
+      manifest.releaseId !== input.releaseId ||
+      !visionManifestsEqual(manifest, dependencies.manifest)
+    ) {
       throw new VisionRuntimeError("runtime-integrity-failed");
     }
     return manifest;
@@ -151,10 +183,15 @@ async function loadVerifiedAsset(
   const response = await fetchResponse(asset.path, signal, dependencies);
   throwIfCancelled(signal);
   try {
-    const bytes = await verifyVisionResponse(response, asset);
+    const bytes = await verifyVisionResponse(response, asset, {
+      source: "verified-service-worker-immutable-route",
+    });
     throwIfCancelled(signal);
     return bytes;
   } catch (error) {
+    if (error instanceof VisionAssetOperationalError) {
+      throw new VisionRuntimeError("offline-cache-failed");
+    }
     if (error instanceof VisionAssetError) {
       throw new VisionRuntimeError(
         error.code === "runtime-download-failed"
@@ -204,7 +241,7 @@ async function constructTier(
   };
   const options: FaceLandmarkerOptions = {
     baseOptions: { delegate: "CPU", modelAssetBuffer },
-    numFaces: 1,
+    numFaces: 2,
     outputFaceBlendshapes: true,
     outputFacialTransformationMatrixes: false,
     runningMode: "VIDEO",
@@ -219,6 +256,9 @@ async function constructTier(
 
   let closed = false;
   return {
+    detectForVideo(frame, timestampMs) {
+      return landmarker.detectForVideo(frame, timestampMs);
+    },
     close() {
       if (!closed) {
         closed = true;
@@ -294,6 +334,7 @@ export function createBrowserVisionDependencies(): VisionRuntimeDependencies {
     createLandmarker: (fileset, options) =>
       FaceLandmarker.createFromOptions(fileset, options),
     fetch: (input, init) => globalThis.fetch(input, init),
+    manifest: VISION_MANIFEST,
     supportsSimd: () => WebAssembly.validate(SIMD_PROBE),
   };
 }

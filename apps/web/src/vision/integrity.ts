@@ -3,6 +3,15 @@ import type { VisionReason } from "./protocol";
 
 export type { VisionAsset } from "./manifest";
 
+export const VISION_ASSET_ERROR_HEADER = "x-smart-smile-vision-error";
+export type VisionResponseVerificationContext =
+  | { source: "untrusted" }
+  | { source: "verified-service-worker-immutable-route" };
+
+const UNTRUSTED_RESPONSE_CONTEXT: VisionResponseVerificationContext = {
+  source: "untrusted",
+};
+
 export class VisionAssetError extends Error {
   readonly assetId: string;
   readonly code: VisionReason;
@@ -22,6 +31,28 @@ export class VisionAssetError extends Error {
       writable: false,
     });
     this.code = code;
+    this.assetId = assetId;
+  }
+}
+
+export class VisionAssetOperationalError extends Error {
+  readonly assetId: string;
+  readonly code = "offline-cache-failed" as const;
+
+  constructor(assetId: string) {
+    super("Vision asset operation failed");
+    Object.defineProperty(this, "name", {
+      configurable: false,
+      enumerable: false,
+      value: "VisionAssetOperationalError",
+      writable: false,
+    });
+    Object.defineProperty(this, "stack", {
+      configurable: false,
+      enumerable: false,
+      value: undefined,
+      writable: false,
+    });
     this.assetId = assetId;
   }
 }
@@ -47,8 +78,15 @@ function toHex(bytes: Uint8Array): string {
 export async function verifyVisionResponse(
   response: Response,
   asset: VisionAsset,
+  context: VisionResponseVerificationContext = UNTRUSTED_RESPONSE_CONTEXT,
 ): Promise<Uint8Array> {
   if (!response.ok) {
+    if (
+      context.source === "verified-service-worker-immutable-route" &&
+      response.headers.get(VISION_ASSET_ERROR_HEADER) === "offline-cache-failed"
+    ) {
+      throw new VisionAssetOperationalError(asset.id);
+    }
     throw new VisionAssetError("runtime-download-failed", asset.id);
   }
 
@@ -56,7 +94,7 @@ export async function verifyVisionResponse(
   try {
     buffer = await response.arrayBuffer();
   } catch {
-    throw new VisionAssetError("runtime-integrity-failed", asset.id);
+    throw new VisionAssetOperationalError(asset.id);
   }
 
   if (buffer.byteLength !== asset.bytes) {
@@ -67,7 +105,7 @@ export async function verifyVisionResponse(
   try {
     digest = await crypto.subtle.digest("SHA-256", buffer);
   } catch {
-    throw new VisionAssetError("runtime-integrity-failed", asset.id);
+    throw new VisionAssetOperationalError(asset.id);
   }
 
   if (!sameHash(toHex(new Uint8Array(digest)), asset.sha256)) {

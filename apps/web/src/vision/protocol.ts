@@ -1,6 +1,25 @@
+import type { FaceGuidance } from "./face-evidence";
+
 export type VisionWasmTier = "unknown" | "simd" | "baseline";
 export type VisionRuntimeState = "idle" | "preparing" | "ready" | "error";
 export type VisionOfflineState = "not-ready" | "caching" | "ready" | "error";
+export type VisionOrientation = "portrait" | "landscape";
+export type VisionInferenceTier = "standard";
+export const VISION_SERVICE_WORKER_PROTOCOL =
+  "smart-smile-vision-sw-v2" as const;
+
+export type VisionServiceWorkerHandshakeCommand = {
+  type: "VISION_SW_HANDSHAKE";
+  requestId: string;
+  protocol: typeof VISION_SERVICE_WORKER_PROTOCOL;
+};
+
+export type VisionServiceWorkerHandshakeEvent = {
+  type: "VISION_SW_HANDSHAKE_ACK";
+  requestId: string;
+  protocol: typeof VISION_SERVICE_WORKER_PROTOCOL;
+};
+
 export type VisionReason =
   | "first-use-offline"
   | "runtime-download-failed"
@@ -16,7 +35,21 @@ export type VisionWorkerCommand =
       manifestUrl: string;
       releaseId: string;
     }
-  | { type: "CANCEL"; generation: number };
+  | { type: "CANCEL"; generation: number }
+  | VisionFrameCommand;
+
+export type VisionFrameCommand = {
+  type: "FRAME";
+  generation: number;
+  cameraGeneration: number;
+  sequence: number;
+  capturedAtMs: number;
+  width: number;
+  height: number;
+  orientation: VisionOrientation;
+  tier: VisionInferenceTier;
+  bitmap: ImageBitmap;
+};
 
 export type VisionWorkerEvent =
   | { type: "PHASE"; generation: number; phase: "verifying" | "initializing" }
@@ -31,7 +64,24 @@ export type VisionWorkerEvent =
       generation: number;
       code: VisionReason;
       recoverable: boolean;
-    };
+    }
+  | VisionFaceEvidenceEvent;
+
+export type VisionFaceEvidenceEvent = {
+  type: "FACE_EVIDENCE";
+  generation: number;
+  cameraGeneration: number;
+  sequence: number;
+  capturedAtMs: number;
+  completedAtMs: number;
+  width: number;
+  height: number;
+  orientation: VisionOrientation;
+  tier: VisionInferenceTier;
+  faceCount: 0 | 1 | 2;
+  guidance: FaceGuidance;
+  eligible: boolean;
+};
 
 export type VisionCacheCommand =
   | {
@@ -84,7 +134,7 @@ export type VisionCacheEvent =
       requestId: string;
       generation: number;
       releaseId: string;
-      code: "offline-cache-failed";
+      code: "offline-cache-failed" | "runtime-integrity-failed";
     };
 
 const REASONS: readonly VisionReason[] = [
@@ -98,6 +148,14 @@ const REASONS: readonly VisionReason[] = [
 const RELEASE_ID_PATTERN = /^[a-f0-9]{16}$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const SAME_ORIGIN = "https://vision.invalid";
+const FACE_GUIDANCE: readonly FaceGuidance[] = [
+  "no-face",
+  "multiple-faces",
+  "too-close",
+  "too-far",
+  "off-center",
+  "face-ready",
+];
 
 function isExactDataObject(
   value: unknown,
@@ -132,6 +190,36 @@ export function isVisionGeneration(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
+function isVisionPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isVisionTimestamp(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isVisionOrientation(value: unknown): value is VisionOrientation {
+  return value === "portrait" || value === "landscape";
+}
+
+function isVisionInferenceTier(value: unknown): value is VisionInferenceTier {
+  return value === "standard";
+}
+
+function isVisionBitmap(value: unknown): value is ImageBitmap {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { close?: unknown }).close === "function"
+  );
+}
+
+function isFaceGuidance(value: unknown): value is FaceGuidance {
+  return (
+    typeof value === "string" && FACE_GUIDANCE.includes(value as FaceGuidance)
+  );
+}
+
 export function isVisionReleaseId(value: unknown): value is string {
   return typeof value === "string" && RELEASE_ID_PATTERN.test(value);
 }
@@ -164,6 +252,28 @@ export function isVisionRequestId(value: unknown): value is string {
 
 export function isVisionReason(value: unknown): value is VisionReason {
   return typeof value === "string" && REASONS.includes(value as VisionReason);
+}
+
+export function isVisionServiceWorkerHandshakeCommand(
+  value: unknown,
+): value is VisionServiceWorkerHandshakeCommand {
+  return (
+    isExactDataObject(value, ["type", "requestId", "protocol"]) &&
+    value.type === "VISION_SW_HANDSHAKE" &&
+    isVisionRequestId(value.requestId) &&
+    value.protocol === VISION_SERVICE_WORKER_PROTOCOL
+  );
+}
+
+export function isVisionServiceWorkerHandshakeEvent(
+  value: unknown,
+): value is VisionServiceWorkerHandshakeEvent {
+  return (
+    isExactDataObject(value, ["type", "requestId", "protocol"]) &&
+    value.type === "VISION_SW_HANDSHAKE_ACK" &&
+    isVisionRequestId(value.requestId) &&
+    value.protocol === VISION_SERVICE_WORKER_PROTOCOL
+  );
 }
 
 function messageType(value: unknown): string | undefined {
@@ -211,6 +321,30 @@ export function isVisionWorkerCommand(
         isExactDataObject(value, ["type", "generation"]) &&
         isVisionGeneration(message.generation)
       );
+    case "FRAME":
+      return (
+        isExactDataObject(value, [
+          "type",
+          "generation",
+          "cameraGeneration",
+          "sequence",
+          "capturedAtMs",
+          "width",
+          "height",
+          "orientation",
+          "tier",
+          "bitmap",
+        ]) &&
+        isVisionGeneration(message.generation) &&
+        isVisionGeneration(message.cameraGeneration) &&
+        isVisionGeneration(message.sequence) &&
+        isVisionTimestamp(message.capturedAtMs) &&
+        isVisionPositiveInteger(message.width) &&
+        isVisionPositiveInteger(message.height) &&
+        isVisionOrientation(message.orientation) &&
+        isVisionInferenceTier(message.tier) &&
+        isVisionBitmap(message.bitmap)
+      );
     default:
       return false;
   }
@@ -255,6 +389,39 @@ export function isVisionWorkerEvent(
         isVisionGeneration(message.generation) &&
         isVisionReason(message.code) &&
         typeof message.recoverable === "boolean"
+      );
+    case "FACE_EVIDENCE":
+      return (
+        isExactDataObject(value, [
+          "type",
+          "generation",
+          "cameraGeneration",
+          "sequence",
+          "capturedAtMs",
+          "completedAtMs",
+          "width",
+          "height",
+          "orientation",
+          "tier",
+          "faceCount",
+          "guidance",
+          "eligible",
+        ]) &&
+        isVisionGeneration(message.generation) &&
+        isVisionGeneration(message.cameraGeneration) &&
+        isVisionGeneration(message.sequence) &&
+        isVisionTimestamp(message.capturedAtMs) &&
+        isVisionTimestamp(message.completedAtMs) &&
+        isVisionPositiveInteger(message.width) &&
+        isVisionPositiveInteger(message.height) &&
+        isVisionOrientation(message.orientation) &&
+        isVisionInferenceTier(message.tier) &&
+        (message.faceCount === 0 ||
+          message.faceCount === 1 ||
+          message.faceCount === 2) &&
+        isFaceGuidance(message.guidance) &&
+        typeof message.eligible === "boolean" &&
+        message.eligible === (message.guidance === "face-ready")
       );
     default:
       return false;
@@ -338,7 +505,8 @@ export function isVisionCacheEvent(value: unknown): value is VisionCacheEvent {
         isVisionRequestId(message.requestId) &&
         isVisionGeneration(message.generation) &&
         isVisionReleaseId(message.releaseId) &&
-        message.code === "offline-cache-failed"
+        (message.code === "offline-cache-failed" ||
+          message.code === "runtime-integrity-failed")
       );
     default:
       return false;

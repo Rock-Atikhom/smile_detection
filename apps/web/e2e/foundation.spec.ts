@@ -336,9 +336,11 @@ test("shows a decoded mirrored contained synthetic-camera preview and stops it i
       name: /Getting smile detection ready|Getting ready/,
     }),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Camera ready" })).toBeVisible(
-    { timeout: 60_000 },
-  );
+  await expect(
+    page.getByRole("status", { name: "Camera status" }),
+  ).toContainText("Smart Smile is ready for offline use", {
+    timeout: 60_000,
+  });
   const baseOrigin = new URL(page.url()).origin;
   expect(
     postLoadRequests.every((url) => new URL(url).origin === baseOrigin),

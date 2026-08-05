@@ -225,3 +225,34 @@ export function getAssetByRole(
 ): VisionAsset | undefined {
   return manifest.assets.find((asset) => asset.role === role);
 }
+
+export function visionManifestsEqual(
+  actual: VisionReleaseManifest,
+  expected: VisionReleaseManifest,
+): boolean {
+  if (
+    actual.schemaVersion !== expected.schemaVersion ||
+    actual.releaseId !== expected.releaseId ||
+    actual.runtimeVersion !== expected.runtimeVersion ||
+    actual.modelVersion !== expected.modelVersion ||
+    actual.assets.length !== expected.assets.length
+  ) {
+    return false;
+  }
+
+  return actual.assets.every((asset, index) => {
+    const expectedAsset = expected.assets[index];
+    return (
+      expectedAsset !== undefined &&
+      asset.bytes === expectedAsset.bytes &&
+      asset.id === expectedAsset.id &&
+      asset.licenseRef === expectedAsset.licenseRef &&
+      asset.path === expectedAsset.path &&
+      asset.requiredForOffline === expectedAsset.requiredForOffline &&
+      asset.role === expectedAsset.role &&
+      asset.sha256 === expectedAsset.sha256 &&
+      asset.source === expectedAsset.source &&
+      asset.version === expectedAsset.version
+    );
+  });
+}

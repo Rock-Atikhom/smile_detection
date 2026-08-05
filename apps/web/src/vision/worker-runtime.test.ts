@@ -12,6 +12,7 @@ vi.mock("./runtime-loader", async (importOriginal) => {
 });
 
 import { prepareVisionRuntime, VisionRuntimeError } from "./runtime-loader";
+import { VISION_MANIFEST } from "./release";
 import { createVisionWorkerRuntime } from "./worker-runtime";
 
 const releaseId = "0123456789abcdef";
@@ -19,6 +20,7 @@ const manifestUrl = "/vision/release-manifest.json";
 const unusedDependencies: VisionRuntimeDependencies = {
   createLandmarker: vi.fn(),
   fetch: vi.fn(),
+  manifest: VISION_MANIFEST,
   supportsSimd: vi.fn(),
 };
 
@@ -27,7 +29,11 @@ function flushPromises(): Promise<void> {
 }
 
 function prepared(wasmTier: "simd" | "baseline" = "simd") {
-  return { close: vi.fn<() => void>(), wasmTier };
+  return {
+    close: vi.fn<() => void>(),
+    detectForVideo: vi.fn(),
+    wasmTier,
+  };
 }
 
 function deferred<T>() {
@@ -42,6 +48,53 @@ function deferred<T>() {
 
 function prepareCommand(generation: number) {
   return { type: "PREPARE", generation, manifestUrl, releaseId } as const;
+}
+
+function bitmap() {
+  return { close: vi.fn<() => void>() } as unknown as ImageBitmap;
+}
+
+function frame(
+  generation: number,
+  image: ImageBitmap,
+  overrides: Partial<{
+    sequence: number;
+    cameraGeneration: number;
+    capturedAtMs: number;
+    width: number;
+    height: number;
+    orientation: "portrait" | "landscape";
+    tier: "standard";
+  }> = {},
+) {
+  return {
+    type: "FRAME" as const,
+    generation,
+    cameraGeneration: 7,
+    sequence: 1,
+    capturedAtMs: 100,
+    width: 640,
+    height: 480,
+    orientation: "portrait" as const,
+    tier: "standard" as const,
+    bitmap: image,
+    ...overrides,
+  };
+}
+
+const eligibleFace = [
+  { x: 0.35, y: 0.25 },
+  { x: 0.65, y: 0.25 },
+  { x: 0.35, y: 0.65 },
+  { x: 0.65, y: 0.65 },
+];
+
+function readyRuntime(instance = prepared()) {
+  vi.mocked(prepareVisionRuntime).mockResolvedValue(instance);
+  const postMessage = vi.fn<(event: VisionWorkerEvent) => void>();
+  const runtime = createVisionWorkerRuntime(unusedDependencies, postMessage);
+  runtime.receive(prepareCommand(4));
+  return { instance, postMessage, runtime };
 }
 
 describe("createVisionWorkerRuntime", () => {
@@ -207,6 +260,11 @@ describe("createVisionWorkerRuntime", () => {
       false,
     ],
     [
+      new VisionRuntimeError("offline-cache-failed"),
+      "offline-cache-failed",
+      true,
+    ],
+    [
       new Error("private upstream details"),
       "runtime-initialization-failed",
       true,
@@ -248,9 +306,202 @@ describe("createVisionWorkerRuntime", () => {
     runtime.dispose();
     runtime.dispose();
     runtime.receive(prepareCommand(5));
+    const discardedImage = bitmap();
+    runtime.receive(frame(4, discardedImage));
 
     expect(input?.signal.aborted).toBe(true);
     expect(instance.close).toHaveBeenCalledOnce();
     expect(prepareVisionRuntime).toHaveBeenCalledOnce();
+    expect(discardedImage.close).toHaveBeenCalledOnce();
+  });
+
+  it("settles an accepted frame synchronously with categorical evidence and cleanup", async () => {
+    const instance = prepared();
+    instance.detectForVideo.mockReturnValueOnce({
+      faceLandmarks: [eligibleFace],
+      faceBlendshapes: [],
+    });
+    const { postMessage, runtime } = readyRuntime(instance);
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, image, { sequence: 7 }));
+
+    expect(instance.detectForVideo).toHaveBeenCalledWith(image, 100);
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(postMessage).toHaveBeenLastCalledWith({
+      type: "FACE_EVIDENCE",
+      generation: 4,
+      cameraGeneration: 7,
+      sequence: 7,
+      capturedAtMs: 100,
+      completedAtMs: expect.any(Number),
+      width: 640,
+      height: 480,
+      orientation: "portrait",
+      tier: "standard",
+      faceCount: 1,
+      guidance: "face-ready",
+      eligible: true,
+    });
+  });
+
+  it("closes a valid frame received before its generation is ready", async () => {
+    const instance = prepared();
+    const pending = deferred<PreparedVisionRuntime>();
+    vi.mocked(prepareVisionRuntime).mockReturnValue(pending.promise);
+    const runtime = createVisionWorkerRuntime(unusedDependencies, vi.fn());
+    const image = bitmap();
+
+    runtime.receive(prepareCommand(4));
+    runtime.receive(frame(4, image));
+
+    expect(image.close).toHaveBeenCalledOnce();
+    pending.resolve(instance);
+  });
+
+  it("closes frames for an old generation without inference", async () => {
+    const { instance, postMessage, runtime } = readyRuntime();
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(3, image));
+
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(instance.detectForVideo).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ERROR" }),
+    );
+  });
+
+  it("closes a frame received after the generation is cancelled", async () => {
+    const instance = prepared();
+    const { postMessage, runtime } = readyRuntime(instance);
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive({ type: "CANCEL", generation: 4 });
+    runtime.receive(frame(4, image));
+
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(instance.detectForVideo).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ERROR" }),
+    );
+  });
+
+  it("closes a frame received after disposal", async () => {
+    const instance = prepared();
+    const { postMessage, runtime } = readyRuntime(instance);
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.dispose();
+    runtime.receive(frame(4, image));
+
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(instance.detectForVideo).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+  });
+
+  it("closes an active frame and posts one safe ERROR when inference throws", async () => {
+    const instance = prepared();
+    instance.detectForVideo.mockImplementationOnce(() => {
+      throw new Error("private inference details");
+    });
+    const { postMessage, runtime } = readyRuntime(instance);
+    const close = vi.fn<() => void>();
+    const image = { close } as unknown as ImageBitmap;
+
+    await flushPromises();
+    runtime.receive(frame(4, image));
+
+    expect(close).toHaveBeenCalledOnce();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+    const errors = postMessage.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.type === "ERROR");
+    expect(errors).toEqual([
+      {
+        type: "ERROR",
+        generation: 4,
+        code: "runtime-initialization-failed",
+        recoverable: true,
+      },
+    ]);
+    expect(close.mock.invocationCallOrder[0]).toBeLessThan(
+      postMessage.mock.invocationCallOrder.at(-1) ?? 0,
+    );
+    expect(JSON.stringify(postMessage.mock.calls)).not.toContain(
+      "private inference details",
+    );
+  });
+
+  it("suppresses inference ERROR after the generation is disposed", async () => {
+    const instance = prepared();
+    const { postMessage, runtime } = readyRuntime(instance);
+    instance.detectForVideo.mockImplementationOnce(() => {
+      runtime.dispose();
+      throw new Error("private inference details");
+    });
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive(frame(4, image));
+
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ERROR" }),
+    );
+  });
+
+  it("closes a bitmap on malformed plain FRAME-like input", async () => {
+    const { instance, postMessage, runtime } = readyRuntime();
+    const image = bitmap();
+
+    await flushPromises();
+    runtime.receive({ ...frame(4, image), unexpected: true });
+
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(instance.detectForVideo).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+  });
+
+  it("closes a bitmap on malformed non-plain FRAME-like input", async () => {
+    const { instance, postMessage, runtime } = readyRuntime();
+    const image = bitmap();
+    const envelope = Object.assign([], frame(4, image));
+
+    await flushPromises();
+    runtime.receive(envelope);
+
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(instance.detectForVideo).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FACE_EVIDENCE" }),
+    );
+  });
+
+  it("does not invoke accessors while probing rejected FRAME-like input", () => {
+    const runtime = createVisionWorkerRuntime(unusedDependencies, vi.fn());
+    const bitmapGetter = vi.fn();
+    const envelope = { type: "FRAME" };
+    Object.defineProperty(envelope, "bitmap", { get: bitmapGetter });
+
+    runtime.receive(envelope);
+
+    expect(bitmapGetter).not.toHaveBeenCalled();
   });
 });

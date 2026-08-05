@@ -17,6 +17,7 @@
     "vision:manifest:check": "node scripts/generate-vision-manifest.mjs --check"
   },
   "dependencies": {
+    "@fontsource-variable/outfit": "^5.3.0",
     "@mediapipe/tasks-vision": "0.10.35",
     "@radix-ui/react-dialog": "1.1.23",
     "react": "19.2.8",

@@ -1,14 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { verifyVisionResponse, VisionAssetError } from "../vision/integrity";
 import { VISION_MANIFEST } from "../vision/release";
-import type { VisionCacheEvent } from "../vision/protocol";
+import { VISION_RELEASE_PATH_PREFIX } from "../vision/manifest";
+import {
+  VISION_SERVICE_WORKER_PROTOCOL,
+  type VisionCacheEvent,
+  type VisionServiceWorkerHandshakeEvent,
+} from "../vision/protocol";
+import { VisionCacheOperationalError } from "./vision-cache";
 
 const mocks = vi.hoisted(() => ({
   cacheVisionRelease: vi.fn(),
   cancelVisionRelease: vi.fn(),
+  clientsClaim: vi.fn(),
   cleanupOutdatedCaches: vi.fn(),
   matchCompletedVisionAsset: vi.fn(),
   precacheAndRoute: vi.fn(),
   queryVisionRelease: vi.fn(),
+}));
+
+vi.mock("workbox-core", () => ({
+  clientsClaim: mocks.clientsClaim,
 }));
 
 vi.mock("workbox-precaching", () => ({
@@ -44,6 +56,7 @@ async function loadWorker() {
     }),
     location: { href: "https://app.test/sw.js", origin: "https://app.test" },
     registration: { scope: "https://app.test/" },
+    skipWaiting: vi.fn(async () => undefined),
   };
   vi.stubGlobal("self", workerScope);
   await import("./sw");
@@ -53,18 +66,23 @@ async function loadWorker() {
 async function dispatchMessage(
   listener: Listener,
   data: unknown,
+  clientId = "client-a",
 ): Promise<VisionCacheEvent[]> {
-  const replies: VisionCacheEvent[] = [];
+  const replies: Array<VisionCacheEvent | VisionServiceWorkerHandshakeEvent> =
+    [];
   let work: Promise<unknown> | undefined;
   listener({
     data,
-    source: { postMessage: (event: VisionCacheEvent) => replies.push(event) },
+    source: {
+      id: clientId,
+      postMessage: (event: VisionCacheEvent) => replies.push(event),
+    },
     waitUntil: (promise: Promise<unknown>) => {
       work = promise;
     },
   } as never);
   await work;
-  return replies;
+  return replies as VisionCacheEvent[];
 }
 
 const releaseId = "0123456789abcdef";
@@ -87,6 +105,29 @@ describe("vision service worker", () => {
       workerScope.__WB_MANIFEST,
     );
     expect(mocks.cacheVisionRelease).not.toHaveBeenCalled();
+    expect(mocks.clientsClaim).toHaveBeenCalledOnce();
+    expect(workerScope.skipWaiting).toHaveBeenCalledOnce();
+  });
+
+  it("answers the exact current handshake without touching vision cache state", async () => {
+    const { listeners } = await loadWorker();
+
+    const replies = await dispatchMessage(listeners.get("message")!, {
+      type: "VISION_SW_HANDSHAKE",
+      requestId: "handshake-4",
+      protocol: VISION_SERVICE_WORKER_PROTOCOL,
+    });
+
+    expect(replies).toEqual([
+      {
+        type: "VISION_SW_HANDSHAKE_ACK",
+        requestId: "handshake-4",
+        protocol: VISION_SERVICE_WORKER_PROTOCOL,
+      },
+    ]);
+    expect(mocks.queryVisionRelease).not.toHaveBeenCalled();
+    expect(mocks.cacheVisionRelease).not.toHaveBeenCalled();
+    expect(mocks.matchCompletedVisionAsset).not.toHaveBeenCalled();
   });
 
   it("replies CACHE_CACHING then CACHE_READY for explicit caching", async () => {
@@ -104,6 +145,24 @@ describe("vision service worker", () => {
     expect(mocks.cacheVisionRelease).toHaveBeenCalledOnce();
   });
 
+  it("maps a release asset integrity exception to fatal cache recovery", async () => {
+    mocks.cacheVisionRelease.mockRejectedValue(
+      new VisionAssetError("runtime-integrity-failed", "notice"),
+    );
+    const { listeners } = await loadWorker();
+
+    const replies = await dispatchMessage(listeners.get("message")!, {
+      type: "CACHE_RELEASE",
+      ...base,
+      manifestUrl: "/vision/release-manifest.json",
+    });
+
+    expect(replies).toEqual([
+      { type: "CACHE_CACHING", ...base },
+      { type: "CACHE_ERROR", ...base, code: "runtime-integrity-failed" },
+    ]);
+  });
+
   it.each([
     ["ready", "CACHE_READY"],
     ["missing", "CACHE_MISSING"],
@@ -119,6 +178,20 @@ describe("vision service worker", () => {
     expect(replies).toEqual([{ type, ...base }]);
   });
 
+  it("maps completed-cache corruption to a fatal bounded reply", async () => {
+    mocks.queryVisionRelease.mockResolvedValue("integrity-failed");
+    const { listeners } = await loadWorker();
+
+    const replies = await dispatchMessage(listeners.get("message")!, {
+      type: "QUERY_RELEASE",
+      ...base,
+    });
+
+    expect(replies).toEqual([
+      { type: "CACHE_ERROR", ...base, code: "runtime-integrity-failed" },
+    ]);
+  });
+
   it("cancels the requested generation and returns a bounded reply", async () => {
     const { listeners } = await loadWorker();
 
@@ -127,8 +200,11 @@ describe("vision service worker", () => {
       ...base,
     });
 
-    expect(mocks.cancelVisionRelease).toHaveBeenCalledWith(4);
-    expect(mocks.cancelVisionRelease).not.toHaveBeenCalledWith(3);
+    expect(mocks.cancelVisionRelease).toHaveBeenCalledWith(
+      "client-a",
+      4,
+      releaseId,
+    );
     expect(replies).toEqual([{ type: "CACHE_CANCELLED", ...base }]);
   });
 
@@ -146,6 +222,7 @@ describe("vision service worker", () => {
       listener({
         data,
         source: {
+          id: "client-a",
           postMessage: (event: VisionCacheEvent) => replies.push(event),
         },
         waitUntil: (promise: Promise<unknown>) => work.push(promise),
@@ -176,6 +253,76 @@ describe("vision service worker", () => {
       { type: "CACHE_CACHING", ...base, requestId: "duplicate-two" },
       { type: "CACHE_CANCELLED", ...base, requestId: "cancel-both" },
     ]);
+  });
+
+  it("isolates same-generation cancellation to the source client", async () => {
+    const first = deferred<"ready">();
+    const second = deferred<"ready">();
+    mocks.cacheVisionRelease
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const { listeners } = await loadWorker();
+    const listener = listeners.get("message")!;
+    const clientAReplies: VisionCacheEvent[] = [];
+    const clientBReplies: VisionCacheEvent[] = [];
+    const work: Promise<unknown>[] = [];
+    const dispatch = (
+      clientId: string,
+      replies: VisionCacheEvent[],
+      data: unknown,
+    ) => {
+      listener({
+        data,
+        source: {
+          id: clientId,
+          postMessage: (event: VisionCacheEvent) => replies.push(event),
+        },
+        waitUntil: (promise: Promise<unknown>) => work.push(promise),
+      } as never);
+    };
+
+    dispatch("client-a", clientAReplies, {
+      type: "CACHE_RELEASE",
+      ...base,
+      requestId: "client-a-release",
+      manifestUrl: "/vision/release-manifest.json",
+    });
+    dispatch("client-b", clientBReplies, {
+      type: "CACHE_RELEASE",
+      ...base,
+      requestId: "client-b-release",
+      manifestUrl: "/vision/release-manifest.json",
+    });
+    dispatch("client-a", clientAReplies, {
+      type: "CANCEL_CACHE",
+      ...base,
+      requestId: "client-a-cancel",
+    });
+    await work[2];
+    first.resolve("ready");
+    second.resolve("ready");
+    await Promise.all([work[0], work[1]]);
+
+    expect(clientAReplies).toEqual([
+      { type: "CACHE_CACHING", ...base, requestId: "client-a-release" },
+      { type: "CACHE_CANCELLED", ...base, requestId: "client-a-cancel" },
+    ]);
+    expect(clientBReplies).toEqual([
+      { type: "CACHE_CACHING", ...base, requestId: "client-b-release" },
+      { type: "CACHE_READY", ...base, requestId: "client-b-release" },
+    ]);
+    expect(mocks.cacheVisionRelease).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ requestId: "client-a-release" }),
+      "client-a",
+      expect.anything(),
+    );
+    expect(mocks.cacheVisionRelease).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ requestId: "client-b-release" }),
+      "client-b",
+      expect.anything(),
+    );
   });
 
   it("does not answer malformed messages", async () => {
@@ -220,9 +367,8 @@ describe("vision service worker", () => {
     expect(responsePromise).toBeUndefined();
   });
 
-  it("uses a same-origin no-store network fallback for a missing asset", async () => {
-    const networkResponse = new Response("network");
-    const network = vi.fn(async () => networkResponse);
+  it("never falls back to unverified network bytes for an immutable asset", async () => {
+    const network = vi.fn(async () => new Response("unverified network"));
     vi.stubGlobal("fetch", network);
     const { listeners } = await loadWorker();
     const path = VISION_MANIFEST.assets[0]!.path;
@@ -236,10 +382,89 @@ describe("vision service worker", () => {
       },
     } as never);
 
-    await expect(responsePromise).resolves.toBe(networkResponse);
-    expect(network).toHaveBeenCalledWith(request, {
-      cache: "no-store",
-      credentials: "same-origin",
+    await expect(responsePromise).resolves.toMatchObject({ status: 503 });
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it("carries an operational immutable-cache failure to runtime verification without network fallback", async () => {
+    mocks.matchCompletedVisionAsset.mockRejectedValue(
+      new VisionCacheOperationalError(),
+    );
+    const network = vi.fn(async () => new Response("unverified network"));
+    vi.stubGlobal("fetch", network);
+    const { listeners } = await loadWorker();
+    const asset = VISION_MANIFEST.assets[0]!;
+    let responsePromise!: Promise<Response>;
+
+    listeners.get("fetch")!({
+      request: new Request(new URL(asset.path, "https://app.test")),
+      respondWith: (promise: Promise<Response>) => {
+        responsePromise = promise;
+      },
+    } as never);
+
+    const response = await responsePromise;
+    const verification = verifyVisionResponse(response, asset, {
+      source: "verified-service-worker-immutable-route",
     });
+    await expect(verification).rejects.toMatchObject({
+      assetId: asset.id,
+      code: "offline-cache-failed",
+    });
+    expect(await response.text()).toBe("");
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "unknown immutable-prefix path",
+      `${VISION_RELEASE_PATH_PREFIX}unknown.js`,
+    ],
+    [
+      "query-bearing immutable path",
+      `${VISION_MANIFEST.assets[0]!.path}?participant=private`,
+    ],
+  ])("returns 503 without network access for a %s", async (_case, path) => {
+    const network = vi.fn(async () => new Response("unverified network"));
+    vi.stubGlobal("fetch", network);
+    const { listeners } = await loadWorker();
+    let responsePromise: Promise<Response> | undefined;
+
+    listeners.get("fetch")!({
+      request: new Request(new URL(path, "https://app.test")),
+      respondWith: (promise: Promise<Response>) => {
+        responsePromise = promise;
+      },
+    } as never);
+
+    expect(responsePromise).toBeDefined();
+    await expect(responsePromise).resolves.toMatchObject({ status: 503 });
+    expect(network).not.toHaveBeenCalled();
+    expect(mocks.matchCompletedVisionAsset).not.toHaveBeenCalled();
+  });
+
+  it("returns bounded empty bytes when an immutable cache entry fails integrity", async () => {
+    mocks.matchCompletedVisionAsset.mockRejectedValue(
+      Object.assign(new Error("private cache bytes"), {
+        code: "runtime-integrity-failed",
+      }),
+    );
+    const network = vi.fn(async () => new Response("unverified network"));
+    vi.stubGlobal("fetch", network);
+    const { listeners } = await loadWorker();
+    const path = VISION_MANIFEST.assets[0]!.path;
+    let responsePromise!: Promise<Response>;
+
+    listeners.get("fetch")!({
+      request: new Request(new URL(path, "https://app.test")),
+      respondWith: (promise: Promise<Response>) => {
+        responsePromise = promise;
+      },
+    } as never);
+
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    expect((await response.arrayBuffer()).byteLength).toBe(0);
+    expect(network).not.toHaveBeenCalled();
   });
 });

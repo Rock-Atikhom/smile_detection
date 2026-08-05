@@ -1,6 +1,11 @@
-import { verifyVisionResponse } from "../vision/integrity";
+import {
+  verifyVisionResponse,
+  VisionAssetError,
+  VisionAssetOperationalError,
+} from "../vision/integrity";
 import {
   parseVisionManifest,
+  visionManifestsEqual,
   type VisionAsset,
   type VisionReleaseManifest,
 } from "../vision/manifest";
@@ -15,6 +20,46 @@ export type CompletionRecord = {
   releaseId: string;
   assetCount: number;
 };
+
+export class VisionCacheIntegrityError extends Error {
+  readonly code = "runtime-integrity-failed" as const;
+
+  constructor() {
+    super("Vision cache integrity failed");
+    Object.defineProperty(this, "name", {
+      configurable: false,
+      enumerable: false,
+      value: "VisionCacheIntegrityError",
+      writable: false,
+    });
+    Object.defineProperty(this, "stack", {
+      configurable: false,
+      enumerable: false,
+      value: undefined,
+      writable: false,
+    });
+  }
+}
+
+export class VisionCacheOperationalError extends Error {
+  readonly code = "offline-cache-failed" as const;
+
+  constructor() {
+    super("Vision cache operation failed");
+    Object.defineProperty(this, "name", {
+      configurable: false,
+      enumerable: false,
+      value: "VisionCacheOperationalError",
+      writable: false,
+    });
+    Object.defineProperty(this, "stack", {
+      configurable: false,
+      enumerable: false,
+      value: undefined,
+      writable: false,
+    });
+  }
+}
 
 export interface CacheLike {
   delete(request: RequestInfo | URL): Promise<boolean>;
@@ -40,9 +85,107 @@ type CacheReleaseCommand = Extract<
   { type: "CACHE_RELEASE" }
 >;
 
-const activeControllers = new Map<number, Set<AbortController>>();
+const activeControllers = new Map<string, Set<AbortController>>();
 const releaseLocks = new Map<string, Promise<void>>();
+interface CacheTrustGeneration {
+  generation: number;
+  inventoryVerification?: Promise<boolean>;
+}
+const cacheTrust = new WeakMap<
+  CacheStorageLike,
+  Map<string, CacheTrustGeneration>
+>();
 const SAFE_RESPONSE_HEADERS = ["content-type", "content-language"] as const;
+
+function operationalError(error: unknown): VisionCacheOperationalError {
+  return error instanceof VisionCacheOperationalError
+    ? error
+    : new VisionCacheOperationalError();
+}
+
+async function openCache(
+  cacheName: string,
+  dependencies: VisionCacheDependencies,
+): Promise<CacheLike> {
+  try {
+    return await dependencies.cacheStorage.open(cacheName);
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
+
+async function matchCache(
+  cache: CacheLike,
+  request: RequestInfo | URL,
+): Promise<Response | undefined> {
+  try {
+    return await cache.match(request);
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
+
+async function putCache(
+  cache: CacheLike,
+  request: RequestInfo | URL,
+  response: Response,
+): Promise<void> {
+  try {
+    await cache.put(request, response);
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
+
+async function deleteCacheEntry(
+  cache: CacheLike,
+  request: RequestInfo | URL,
+): Promise<boolean> {
+  try {
+    return await cache.delete(request);
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
+
+function trustGeneration(
+  cacheName: string,
+  dependencies: VisionCacheDependencies,
+): CacheTrustGeneration {
+  let storageTrust = cacheTrust.get(dependencies.cacheStorage);
+  if (storageTrust === undefined) {
+    storageTrust = new Map();
+    cacheTrust.set(dependencies.cacheStorage, storageTrust);
+  }
+  let generation = storageTrust.get(cacheName);
+  if (generation === undefined) {
+    generation = { generation: 0 };
+    storageTrust.set(cacheName, generation);
+  }
+  return generation;
+}
+
+function invalidateCacheTrust(
+  cacheName: string,
+  dependencies: VisionCacheDependencies,
+): void {
+  const previous = trustGeneration(cacheName, dependencies);
+  cacheTrust.get(dependencies.cacheStorage)!.set(cacheName, {
+    generation: previous.generation + 1,
+  });
+}
+
+async function deleteOwnedCache(
+  cacheName: string,
+  dependencies: VisionCacheDependencies,
+): Promise<boolean> {
+  invalidateCacheTrust(cacheName, dependencies);
+  try {
+    return await dependencies.cacheStorage.delete(cacheName);
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
 
 function isCompletionRecord(
   value: unknown,
@@ -77,17 +220,24 @@ function isCompletionRecord(
   );
 }
 
+type CompletionState =
+  | { state: "missing" }
+  | { state: "corrupt" }
+  | { record: CompletionRecord; state: "complete" };
+
 async function readCompletion(
   cache: CacheLike,
   dependencies: VisionCacheDependencies,
-): Promise<CompletionRecord | undefined> {
+): Promise<CompletionState> {
   const requiredAssetCount = dependencies.manifest.assets.filter(
     (asset) => asset.requiredForOffline,
   ).length;
-  const response = await cache.match(
+  const response = await matchCache(
+    cache,
     completionUrl(dependencies.scope, dependencies.manifest.releaseId),
   );
-  if (response === undefined || !response.ok) return undefined;
+  if (response === undefined) return { state: "missing" };
+  if (!response.ok) return { state: "corrupt" };
   try {
     const value: unknown = await response.json();
     return isCompletionRecord(
@@ -95,41 +245,12 @@ async function readCompletion(
       dependencies.manifest.releaseId,
       requiredAssetCount,
     )
-      ? value
-      : undefined;
-  } catch {
-    return undefined;
+      ? { record: value, state: "complete" }
+      : { state: "corrupt" };
+  } catch (error) {
+    if (error instanceof SyntaxError) return { state: "corrupt" };
+    throw operationalError(error);
   }
-}
-
-function sameManifest(
-  actual: VisionReleaseManifest,
-  configured: VisionReleaseManifest,
-): boolean {
-  if (
-    actual.schemaVersion !== configured.schemaVersion ||
-    actual.releaseId !== configured.releaseId ||
-    actual.runtimeVersion !== configured.runtimeVersion ||
-    actual.modelVersion !== configured.modelVersion ||
-    actual.assets.length !== configured.assets.length
-  ) {
-    return false;
-  }
-  return actual.assets.every((asset, index) => {
-    const expected = configured.assets[index];
-    return (
-      expected !== undefined &&
-      asset.bytes === expected.bytes &&
-      asset.id === expected.id &&
-      asset.licenseRef === expected.licenseRef &&
-      asset.path === expected.path &&
-      asset.requiredForOffline === expected.requiredForOffline &&
-      asset.role === expected.role &&
-      asset.sha256 === expected.sha256 &&
-      asset.source === expected.source &&
-      asset.version === expected.version
-    );
-  });
 }
 
 function fetchOptions(signal: AbortSignal): RequestInit {
@@ -153,19 +274,24 @@ function ensureNotCancelled(signal: AbortSignal): void {
   }
 }
 
-function addController(generation: number, controller: AbortController): void {
-  const controllers = activeControllers.get(generation) ?? new Set();
-  controllers.add(controller);
-  activeControllers.set(generation, controllers);
+function controllerKey(
+  ownerId: string,
+  generation: number,
+  releaseId: string,
+): string {
+  return JSON.stringify([ownerId, generation, releaseId]);
 }
 
-function removeController(
-  generation: number,
-  controller: AbortController,
-): void {
-  const controllers = activeControllers.get(generation);
+function addController(key: string, controller: AbortController): void {
+  const controllers = activeControllers.get(key) ?? new Set();
+  controllers.add(controller);
+  activeControllers.set(key, controllers);
+}
+
+function removeController(key: string, controller: AbortController): void {
+  const controllers = activeControllers.get(key);
   controllers?.delete(controller);
-  if (controllers?.size === 0) activeControllers.delete(generation);
+  if (controllers?.size === 0) activeControllers.delete(key);
 }
 
 function acquireReleaseLock(releaseId: string): {
@@ -195,31 +321,49 @@ async function fetchManifest(
   dependencies: VisionCacheDependencies,
   signal: AbortSignal,
 ) {
-  const response = await dependencies.fetch(
-    command.manifestUrl,
-    fetchOptions(signal),
-  );
-  if (!response.ok) throw new Error("Vision manifest download failed");
-  const parsed = parseVisionManifest(await response.json());
+  let response: Response;
+  try {
+    response = await dependencies.fetch(
+      command.manifestUrl,
+      fetchOptions(signal),
+    );
+  } catch (error) {
+    if (signal.aborted) ensureNotCancelled(signal);
+    throw operationalError(error);
+  }
+  if (!response.ok) throw new VisionCacheOperationalError();
+  let value: unknown;
+  try {
+    value = await response.json();
+  } catch (error) {
+    if (signal.aborted) ensureNotCancelled(signal);
+    if (error instanceof SyntaxError) throw new VisionCacheIntegrityError();
+    throw operationalError(error);
+  }
+  let parsed: VisionReleaseManifest;
+  try {
+    parsed = parseVisionManifest(value);
+  } catch {
+    throw new VisionCacheIntegrityError();
+  }
   if (
     parsed.releaseId !== command.releaseId ||
-    !sameManifest(parsed, dependencies.manifest)
+    !visionManifestsEqual(parsed, dependencies.manifest)
   ) {
-    throw new Error("Vision manifest inventory mismatch");
+    throw new VisionCacheIntegrityError();
   }
   return parsed;
 }
 
-async function requiredEntriesAreVerified(
+async function allEntriesAreVerified(
   cache: CacheLike,
   dependencies: VisionCacheDependencies,
   signal?: AbortSignal,
 ): Promise<boolean> {
   try {
     for (const asset of dependencies.manifest.assets) {
-      if (!asset.requiredForOffline) continue;
       if (signal !== undefined) ensureNotCancelled(signal);
-      const cached = await cache.match(asset.path);
+      const cached = await matchCache(cache, asset.path);
       if (signal !== undefined) ensureNotCancelled(signal);
       if (cached === undefined) return false;
       await (dependencies.verifyResponse ?? verifyVisionResponse)(
@@ -229,21 +373,84 @@ async function requiredEntriesAreVerified(
       if (signal !== undefined) ensureNotCancelled(signal);
     }
     return true;
-  } catch {
+  } catch (error) {
     if (signal?.aborted === true) ensureNotCancelled(signal);
-    return false;
+    if (
+      error instanceof VisionAssetError ||
+      error instanceof VisionCacheIntegrityError
+    ) {
+      return false;
+    }
+    if (error instanceof VisionAssetOperationalError) {
+      throw new VisionCacheOperationalError();
+    }
+    throw operationalError(error);
   }
 }
 
-async function completedCacheIsUsable(
-  cache: CacheLike,
+async function inspectCompletedCache(
+  cacheName: string,
   dependencies: VisionCacheDependencies,
   signal?: AbortSignal,
-): Promise<boolean> {
-  return (
-    (await readCompletion(cache, dependencies)) !== undefined &&
-    (await requiredEntriesAreVerified(cache, dependencies, signal))
-  );
+): Promise<{
+  cache: CacheLike;
+  state: "ready" | "missing" | "integrity-failed";
+}> {
+  for (;;) {
+    if (signal !== undefined) ensureNotCancelled(signal);
+    const generation = trustGeneration(cacheName, dependencies);
+    const cache = await openCache(cacheName, dependencies);
+    const completion = await readCompletion(cache, dependencies);
+    if (signal !== undefined) ensureNotCancelled(signal);
+    if (trustGeneration(cacheName, dependencies) !== generation) continue;
+    if (completion.state !== "complete") {
+      if (generation.inventoryVerification !== undefined) {
+        invalidateCacheTrust(cacheName, dependencies);
+        continue;
+      }
+      return {
+        cache,
+        state: completion.state === "missing" ? "missing" : "integrity-failed",
+      };
+    }
+
+    const verification =
+      generation.inventoryVerification ??
+      allEntriesAreVerified(cache, dependencies);
+    generation.inventoryVerification = verification;
+    let verified: boolean;
+    try {
+      verified = await verification;
+    } catch (error) {
+      if (trustGeneration(cacheName, dependencies) === generation) {
+        invalidateCacheTrust(cacheName, dependencies);
+      }
+      throw operationalError(error);
+    }
+    if (signal !== undefined) ensureNotCancelled(signal);
+    if (trustGeneration(cacheName, dependencies) !== generation) continue;
+    if (!verified) {
+      invalidateCacheTrust(cacheName, dependencies);
+      return { cache, state: "integrity-failed" };
+    }
+    return {
+      cache,
+      state: "ready",
+    };
+  }
+}
+
+async function deleteCorruptRelease(
+  cacheName: string,
+  dependencies: VisionCacheDependencies,
+): Promise<never> {
+  try {
+    await deleteOwnedCache(cacheName, dependencies);
+  } catch {
+    // The fatal integrity result remains authoritative even if storage cleanup
+    // itself fails. A later request must never treat this release as complete.
+  }
+  throw new VisionCacheIntegrityError();
 }
 
 async function storeAsset(
@@ -261,7 +468,8 @@ async function storeAsset(
   ensureNotCancelled(signal);
   const responseBytes = new Uint8Array(bytes.byteLength);
   responseBytes.set(bytes);
-  await cache.put(
+  await putCache(
+    cache,
     asset.path,
     new Response(responseBytes.buffer, {
       headers: safeHeaders(upstream.headers),
@@ -273,18 +481,23 @@ async function storeAsset(
 export async function queryVisionRelease(
   releaseId: string,
   dependencies: VisionCacheDependencies,
-): Promise<"ready" | "missing"> {
+): Promise<"ready" | "missing" | "integrity-failed"> {
   if (releaseId !== dependencies.manifest.releaseId) return "missing";
-  const cache = await dependencies.cacheStorage.open(
-    visionCacheName(releaseId),
-  );
-  return (await completedCacheIsUsable(cache, dependencies))
-    ? "ready"
-    : "missing";
+  const cacheName = visionCacheName(releaseId);
+  const { state } = await inspectCompletedCache(cacheName, dependencies);
+  if (state !== "integrity-failed") return state;
+  try {
+    await deleteCorruptRelease(cacheName, dependencies);
+  } catch (error) {
+    if (error instanceof VisionCacheIntegrityError) return "integrity-failed";
+    throw error;
+  }
+  return "integrity-failed";
 }
 
 export async function cacheVisionRelease(
   command: CacheReleaseCommand,
+  ownerId: string,
   dependencies: VisionCacheDependencies,
 ): Promise<"ready"> {
   if (
@@ -295,24 +508,38 @@ export async function cacheVisionRelease(
     throw new Error("Vision manifest inventory mismatch");
   }
   const controller = new AbortController();
-  addController(command.generation, controller);
+  const key = controllerKey(ownerId, command.generation, command.releaseId);
+  addController(key, controller);
   const lock = acquireReleaseLock(command.releaseId);
   const cacheName = visionCacheName(command.releaseId);
   let cache: CacheLike | undefined;
   let mutationStarted = false;
   try {
+    invalidateCacheTrust(cacheName, dependencies);
     await lock.wait;
     ensureNotCancelled(controller.signal);
-    cache = await dependencies.cacheStorage.open(cacheName);
-    if (await completedCacheIsUsable(cache, dependencies, controller.signal)) {
+    const inspected = await inspectCompletedCache(
+      cacheName,
+      dependencies,
+      controller.signal,
+    );
+    cache = inspected.cache;
+    const existingState = inspected.state;
+    if (existingState === "ready") {
       ensureNotCancelled(controller.signal);
       return "ready";
+    }
+    if (existingState === "integrity-failed") {
+      await deleteCorruptRelease(cacheName, dependencies);
     }
 
     ensureNotCancelled(controller.signal);
     mutationStarted = true;
+    invalidateCacheTrust(cacheName, dependencies);
     const marker = completionUrl(dependencies.scope, command.releaseId);
-    if ((await cache.match(marker)) !== undefined) await cache.delete(marker);
+    if ((await matchCache(cache, marker)) !== undefined) {
+      await deleteCacheEntry(cache, marker);
+    }
 
     const release = await fetchManifest(
       command,
@@ -324,13 +551,9 @@ export async function cacheVisionRelease(
     }
     ensureNotCancelled(controller.signal);
     if (
-      !(await requiredEntriesAreVerified(
-        cache,
-        dependencies,
-        controller.signal,
-      ))
+      !(await allEntriesAreVerified(cache, dependencies, controller.signal))
     ) {
-      throw new Error("Vision cache readback failed");
+      throw new VisionCacheIntegrityError();
     }
     const completion: CompletionRecord = {
       schemaVersion: 1,
@@ -339,28 +562,35 @@ export async function cacheVisionRelease(
         .length,
     };
     ensureNotCancelled(controller.signal);
-    await cache.put(
+    await putCache(
+      cache,
       completionUrl(dependencies.scope, command.releaseId),
       Response.json(completion),
     );
+    ensureNotCancelled(controller.signal);
     return "ready";
   } catch (error) {
-    if (
-      mutationStarted &&
-      cache !== undefined &&
-      !(await completedCacheIsUsable(cache, dependencies))
-    ) {
-      await dependencies.cacheStorage.delete(cacheName);
+    if (mutationStarted && cache !== undefined) {
+      try {
+        await deleteOwnedCache(cacheName, dependencies);
+      } catch {
+        // Preserve the original bounded cache/integrity failure.
+      }
     }
     throw error;
   } finally {
     lock.release();
-    removeController(command.generation, controller);
+    removeController(key, controller);
   }
 }
 
-export function cancelVisionRelease(generation: number): void {
-  for (const controller of activeControllers.get(generation) ?? []) {
+export function cancelVisionRelease(
+  ownerId: string,
+  generation: number,
+  releaseId: string,
+): void {
+  const key = controllerKey(ownerId, generation, releaseId);
+  for (const controller of activeControllers.get(key) ?? []) {
     controller.abort(
       new DOMException("The operation was aborted", "AbortError"),
     );
@@ -373,11 +603,42 @@ export async function matchCompletedVisionAsset(
   dependencies: VisionCacheDependencies,
 ): Promise<Response | undefined> {
   if (releaseId !== dependencies.manifest.releaseId) return undefined;
-  const cache = await dependencies.cacheStorage.open(
-    visionCacheName(releaseId),
-  );
-  if (!(await completedCacheIsUsable(cache, dependencies))) {
-    return undefined;
+  const cacheName = visionCacheName(releaseId);
+  const { cache, state } = await inspectCompletedCache(cacheName, dependencies);
+  if (state === "missing") return undefined;
+  if (state === "integrity-failed") {
+    await deleteCorruptRelease(cacheName, dependencies);
   }
-  return cache.match(request);
+
+  const requestUrl =
+    typeof request === "string"
+      ? new URL(request, dependencies.scope)
+      : request instanceof URL
+        ? request
+        : new URL(request.url);
+  const asset = dependencies.manifest.assets.find(
+    (candidate) => candidate.path === requestUrl.pathname,
+  );
+  if (asset === undefined) return undefined;
+  const cached = await matchCache(cache, request);
+  if (cached === undefined) {
+    return deleteCorruptRelease(cacheName, dependencies);
+  }
+  try {
+    const bytes = await (dependencies.verifyResponse ?? verifyVisionResponse)(
+      cached,
+      asset,
+    );
+    const responseBytes = new Uint8Array(bytes.byteLength);
+    responseBytes.set(bytes);
+    return new Response(responseBytes.buffer, {
+      headers: safeHeaders(cached.headers),
+      status: 200,
+    });
+  } catch (error) {
+    if (error instanceof VisionAssetError) {
+      await deleteCorruptRelease(cacheName, dependencies);
+    }
+    throw operationalError(error);
+  }
 }
