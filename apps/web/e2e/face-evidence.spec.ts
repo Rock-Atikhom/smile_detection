@@ -66,21 +66,20 @@ async function exposeSecondCamera(page: Page) {
         neutral.video = neutralVideo;
       }
       // On headless fake-device backends (notably Linux CI) the fake camera
-      // cannot serve two simultaneous captures, so a switch request that keeps
-      // the prior stream attached can return a track that ends immediately and
-      // never advances the camera generation. Release the previous fake stream
-      // (whether the initial camera or a prior synthetic switch) before
-      // fulfilling the synthetic second camera, mirroring the production mobile
-      // release-before-request path.
+      // cannot serve two simultaneous captures. Stopping the prior stream alone
+      // is not enough: the live <video> element still pins the old capture via
+      // its srcObject, so the second request fails and the camera generation
+      // never advances. Fully release the previous capture (tracks + the video
+      // element's srcObject) before fulfilling the synthetic second camera.
       if (
         requestedDeviceId(constraints) !== undefined &&
         previousReturnedStream
       ) {
         previousReturnedStream.getTracks().forEach((track) => track.stop());
-        // Give the headless fake-device backend a moment to release the prior
-        // capture before requesting the synthetic second camera, otherwise the
-        // two concurrent captures contend and the switch never advances the
-        // camera generation on Linux CI.
+        const preview = document.querySelector("video");
+        if (preview && preview.srcObject === previousReturnedStream) {
+          preview.srcObject = null;
+        }
         await new Promise((resolve) => setTimeout(resolve, 60));
       }
       const stream = await originalGetUserMedia(neutral);
