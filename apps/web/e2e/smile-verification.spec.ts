@@ -73,8 +73,9 @@ async function exposeSecondCamera(page: Page) {
     navigator.mediaDevices.getUserMedia = async (constraints) => {
       const neutral = { ...(constraints ?? {}) };
       if (neutral.video && typeof neutral.video === "object") {
-        const { deviceId: _deviceId, ...rest } = neutral.video;
-        neutral.video = rest;
+        const neutralVideo = { ...neutral.video };
+        delete neutralVideo.deviceId;
+        neutral.video = neutralVideo;
       }
       const stream = await originalGetUserMedia(neutral);
       const deviceId = requestedDeviceId(constraints);
