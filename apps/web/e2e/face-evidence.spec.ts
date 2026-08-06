@@ -77,6 +77,11 @@ async function exposeSecondCamera(page: Page) {
         previousReturnedStream
       ) {
         previousReturnedStream.getTracks().forEach((track) => track.stop());
+        // Give the headless fake-device backend a moment to release the prior
+        // capture before requesting the synthetic second camera, otherwise the
+        // two concurrent captures contend and the switch never advances the
+        // camera generation on Linux CI.
+        await new Promise((resolve) => setTimeout(resolve, 60));
       }
       const stream = await originalGetUserMedia(neutral);
       previousReturnedStream = stream;
