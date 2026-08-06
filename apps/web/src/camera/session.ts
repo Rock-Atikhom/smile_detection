@@ -190,12 +190,7 @@ export class CameraSession {
       this.lastFacingMode ??
       (mobile ? "user" : undefined);
     const alternateFacing = currentFacing === "user" ? "environment" : "user";
-    // Release the active stream before requesting the next one. Some platforms
-    // (and headless fake-device backends) cannot serve two simultaneous captures,
-    // so keeping the old track attached would let the new request's track end
-    // mid-acquire and leave the switch stuck. Detaching first keeps the switch
-    // atomic and lets the generation advance when the new stream attaches.
-    const releaseBeforeRequest = true;
+    const releaseBeforeRequest = mobile;
     this.switchingFromStream = oldStream;
     if (releaseBeforeRequest) {
       stopTracks(oldStream);
