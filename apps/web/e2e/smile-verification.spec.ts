@@ -53,6 +53,43 @@ declare global {
 
 async function exposeSecondCamera(page: Page) {
   await page.addInitScript(() => {
+    const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
+      navigator.mediaDevices,
+    );
+    const requestedDeviceId = (
+      constraints: MediaStreamConstraints | undefined,
+    ) => {
+      const video = constraints?.video;
+      if (video && typeof video === "object" && "deviceId" in video) {
+        const deviceId = (video as { deviceId: unknown }).deviceId;
+        if (typeof deviceId === "string") return deviceId;
+        if (deviceId && typeof deviceId === "object" && "exact" in deviceId) {
+          const exact = (deviceId as { exact: unknown }).exact;
+          if (typeof exact === "string") return exact;
+        }
+      }
+      return undefined;
+    };
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+      const neutral = { ...(constraints ?? {}) };
+      if (neutral.video && typeof neutral.video === "object") {
+        const { deviceId: _deviceId, ...rest } = neutral.video;
+        neutral.video = rest;
+      }
+      const stream = await originalGetUserMedia(neutral);
+      const deviceId = requestedDeviceId(constraints);
+      if (deviceId !== undefined) {
+        const track = stream.getVideoTracks()[0];
+        if (track) {
+          const settings = track.getSettings();
+          Object.defineProperty(track, "getSettings", {
+            configurable: true,
+            value: () => ({ ...settings, deviceId }),
+          });
+        }
+      }
+      return stream;
+    };
     const original = navigator.mediaDevices.enumerateDevices.bind(
       navigator.mediaDevices,
     );
@@ -63,10 +100,10 @@ async function exposeSecondCamera(page: Page) {
         ? [
             video,
             {
-              deviceId: video.deviceId,
+              deviceId: "synthetic-second-camera",
               groupId: "synthetic-camera-group",
               kind: "videoinput",
-              label: "",
+              label: "synthetic-second-camera",
               toJSON: () => ({}),
             },
           ]
