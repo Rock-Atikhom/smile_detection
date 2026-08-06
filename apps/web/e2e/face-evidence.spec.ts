@@ -70,9 +70,14 @@ async function exposeSecondCamera(page: Page) {
         const track = stream.getVideoTracks()[0];
         if (track) {
           const settings = track.getSettings();
+          const capabilities = track.getCapabilities?.() ?? {};
           Object.defineProperty(track, "getSettings", {
             configurable: true,
             value: () => ({ ...settings, deviceId }),
+          });
+          Object.defineProperty(track, "getCapabilities", {
+            configurable: true,
+            value: () => ({ ...capabilities, deviceId }),
           });
         }
       }
