@@ -57,24 +57,42 @@ async function exposeSecondCamera(page: Page) {
       }
       return undefined;
     };
+    const SYNTHETIC_SECOND_CAMERA = "synthetic-second-camera";
     let previousReturnedStream: MediaStream | undefined;
     navigator.mediaDevices.getUserMedia = async (constraints) => {
-      const neutral = { ...(constraints ?? {}) };
-      if (neutral.video && typeof neutral.video === "object") {
-        const neutralVideo = { ...neutral.video };
-        delete neutralVideo.deviceId;
-        neutral.video = neutralVideo;
-      }
-      // On headless fake-device backends (notably Linux CI) the fake camera
-      // cannot serve two simultaneous captures. Stopping the prior stream alone
-      // is not enough: the live <video> element still pins the old capture via
-      // its srcObject, so the second request fails and the camera generation
-      // never advances. Fully release the previous capture (tracks + the video
-      // element's srcObject) before fulfilling the synthetic second camera.
-      if (
-        requestedDeviceId(constraints) !== undefined &&
-        previousReturnedStream
-      ) {
+      const deviceId = requestedDeviceId(constraints);
+      // The headless fake-device backend (notably Linux CI) only exposes a
+      // single default camera, so requesting the synthetic second device id
+      // yields the same capture and the switch can never advance the camera
+      // generation. Map the synthetic second camera to an environment-facing
+      // request (ideal, so it never rejects) which is a genuinely distinct,
+      // attachable stream, then report the synthetic device id through the track
+      // settings so the rest of the app behaves as with a real second camera.
+      const effective =
+        deviceId === SYNTHETIC_SECOND_CAMERA
+          ? {
+              audio: false,
+              video: {
+                facingMode: { ideal: "environment" },
+                frameRate: { ideal: 30 },
+                height: { ideal: 720 },
+                width: { ideal: 1280 },
+              },
+            }
+          : (() => {
+              const neutral = { ...(constraints ?? {}) };
+              if (neutral.video && typeof neutral.video === "object") {
+                const neutralVideo = { ...neutral.video };
+                delete neutralVideo.deviceId;
+                neutral.video = neutralVideo;
+              }
+              return neutral;
+            })();
+      // Fully release the previous capture before fulfilling the synthetic second
+      // camera: stop its tracks and clear the live <video> element's srcObject,
+      // otherwise the fake device keeps the old capture pinned and the switch
+      // never advances the camera generation on Linux CI.
+      if (deviceId !== undefined && previousReturnedStream) {
         previousReturnedStream.getTracks().forEach((track) => track.stop());
         const preview = document.querySelector("video");
         if (preview && preview.srcObject === previousReturnedStream) {
@@ -82,9 +100,8 @@ async function exposeSecondCamera(page: Page) {
         }
         await new Promise((resolve) => setTimeout(resolve, 60));
       }
-      const stream = await originalGetUserMedia(neutral);
+      const stream = await originalGetUserMedia(effective);
       previousReturnedStream = stream;
-      const deviceId = requestedDeviceId(constraints);
       if (deviceId !== undefined) {
         const track = stream.getVideoTracks()[0];
         if (track) {
