@@ -84,7 +84,10 @@ async function exposeSecondCamera(page: Page) {
       // never advances the camera generation. Release the previous fake stream
       // before fulfilling the synthetic second camera, mirroring the production
       // mobile release-before-request path.
-      if (requestedDeviceId(constraints) !== undefined && previousSyntheticStream) {
+      if (
+        requestedDeviceId(constraints) !== undefined &&
+        previousSyntheticStream
+      ) {
         previousSyntheticStream.getTracks().forEach((track) => track.stop());
       }
       const stream = await originalGetUserMedia(neutral);
