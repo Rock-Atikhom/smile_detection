@@ -57,7 +57,7 @@ async function exposeSecondCamera(page: Page) {
       }
       return undefined;
     };
-    let previousSyntheticStream: MediaStream | undefined;
+    let previousReturnedStream: MediaStream | undefined;
     navigator.mediaDevices.getUserMedia = async (constraints) => {
       const neutral = { ...(constraints ?? {}) };
       if (neutral.video && typeof neutral.video === "object") {
@@ -69,18 +69,17 @@ async function exposeSecondCamera(page: Page) {
       // cannot serve two simultaneous captures, so a switch request that keeps
       // the prior stream attached can return a track that ends immediately and
       // never advances the camera generation. Release the previous fake stream
-      // before fulfilling the synthetic second camera, mirroring the production
-      // mobile release-before-request path.
+      // (whether the initial camera or a prior synthetic switch) before
+      // fulfilling the synthetic second camera, mirroring the production mobile
+      // release-before-request path.
       if (
         requestedDeviceId(constraints) !== undefined &&
-        previousSyntheticStream
+        previousReturnedStream
       ) {
-        previousSyntheticStream.getTracks().forEach((track) => track.stop());
+        previousReturnedStream.getTracks().forEach((track) => track.stop());
       }
       const stream = await originalGetUserMedia(neutral);
-      if (requestedDeviceId(constraints) !== undefined) {
-        previousSyntheticStream = stream;
-      }
+      previousReturnedStream = stream;
       const deviceId = requestedDeviceId(constraints);
       if (deviceId !== undefined) {
         const track = stream.getVideoTracks()[0];
