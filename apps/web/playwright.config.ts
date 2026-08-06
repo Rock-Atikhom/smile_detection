@@ -5,6 +5,7 @@ delete process.env.NO_COLOR;
 export default defineConfig({
   testDir: "./e2e",
   forbidOnly: Boolean(process.env.CI),
+  workers: process.env.CI ? 2 : 2,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {

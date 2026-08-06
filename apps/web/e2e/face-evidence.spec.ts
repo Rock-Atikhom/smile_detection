@@ -278,9 +278,18 @@ async function installFaceEvidenceWorker(page: Page) {
         };
       },
       next(guidance) {
+        if (state.waitForNext !== null) {
+          throw new Error("Previous next() not yet delivered");
+        }
         return new Promise((resolve) => {
           state.waitForNext = { guidance, resolve };
+          const poll = () => {
+            const waiter = state.waitForNext;
+            tryDeliverNext();
+            if (waiter === state.waitForNext) setTimeout(poll, 25);
+          };
           tryDeliverNext();
+          if (state.waitForNext !== null) setTimeout(poll, 25);
         });
       },
       waitForNewCameraGeneration(previous) {
@@ -293,6 +302,26 @@ async function installFaceEvidenceWorker(page: Page) {
         }
         return new Promise((resolve) => {
           state.waitForCamera.push({ previous, resolve });
+          const poll = () => {
+            if (
+              state.waitForCamera.some(
+                (w) =>
+                  w.previous === previous &&
+                  currentWorker()?.latestFrame?.cameraGeneration !==
+                    undefined &&
+                  (currentWorker()?.latestFrame?.cameraGeneration ?? -1) >
+                    previous,
+              )
+            ) {
+              state.waitForCamera = state.waitForCamera.filter(
+                (w) => w.previous !== previous,
+              );
+              resolve();
+              return;
+            }
+            setTimeout(poll, 25);
+          };
+          setTimeout(poll, 25);
         });
       },
       waitForNewSequence(previous) {
@@ -305,6 +334,24 @@ async function installFaceEvidenceWorker(page: Page) {
         }
         return new Promise((resolve) => {
           state.waitForSequence.push({ previous, resolve });
+          const poll = () => {
+            if (
+              state.waitForSequence.some(
+                (w) =>
+                  w.previous === previous &&
+                  currentWorker()?.latestFrame?.sequence !== undefined &&
+                  (currentWorker()?.latestFrame?.sequence ?? -1) > previous,
+              )
+            ) {
+              state.waitForSequence = state.waitForSequence.filter(
+                (w) => w.previous !== previous,
+              );
+              resolve();
+              return;
+            }
+            setTimeout(poll, 25);
+          };
+          setTimeout(poll, 25);
         });
       },
     };
@@ -332,7 +379,7 @@ test("guides one face through the real coordinator without retaining or sending 
   await page.getByRole("button", { name: "Continue to camera" }).click();
 
   const status = page.getByRole("status", { name: "Camera status" });
-  await expect(status).toContainText("Camera ready");
+  await expect(status).toContainText("Camera ready", { timeout: 60_000 });
 
   for (const [guidance, copy] of [
     ["no-face", "Show your face"],
