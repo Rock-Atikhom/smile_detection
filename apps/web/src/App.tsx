@@ -769,6 +769,10 @@ export default function App() {
     stopFaceFramePump();
     switchCamera();
   };
+  const runNewDetection = () => {
+    setOfflineAnnouncement("");
+    vision.resetDetection();
+  };
   const runAction = () => {
     if (fatalIntegrity) window.location.reload();
     else if (snapshot.reason === "switch-failed") runSwitchCamera();
@@ -915,6 +919,16 @@ export default function App() {
                       </div>
                     ) : null}
                     <div className="session-controls">
+                      {smileProgress.phase === "complete" && (
+                        <button
+                          className="session-control session-control--new"
+                          onClick={runNewDetection}
+                          type="button"
+                        >
+                          <span aria-hidden="true">＋</span>
+                          New detection
+                        </button>
+                      )}
                       <button
                         className="session-control session-control--stop"
                         onClick={stopCombined}

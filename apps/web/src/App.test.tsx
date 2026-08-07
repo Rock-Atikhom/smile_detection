@@ -18,6 +18,7 @@ const vision = vi.hoisted(() => ({
   cancel: vi.fn(),
   prepare: vi.fn<() => Promise<"started" | "first-use-offline" | "failed">>(),
   restart: vi.fn<() => Promise<"started" | "first-use-offline" | "failed">>(),
+  resetDetection: vi.fn(),
   submitFrame: vi.fn(() => true),
   snapshot: {
     face: {
@@ -110,6 +111,7 @@ function resetVision() {
   vision.cancel.mockReset();
   vision.prepare.mockReset().mockResolvedValue("started");
   vision.restart.mockReset().mockResolvedValue("started");
+  vision.resetDetection.mockReset();
   vision.submitFrame.mockReset().mockReturnValue(true);
   framePump.dispose.mockReset();
   framePump.stop.mockReset();
@@ -1445,6 +1447,22 @@ describe("Smart Smile camera session", () => {
       expect(
         screen.getByRole("status", { name: "Camera status" }),
       ).not.toHaveTextContent(/\d+\.\d+/);
+    });
+
+    it("offers a new detection after verification", async () => {
+      vi.useFakeTimers();
+      const view = await makeCameraReadyForFrames();
+      setSmile({
+        continuity: "ready",
+        phase: "complete",
+        progressMs: 5000,
+      });
+      view.rerender(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "New detection" }));
+
+      expect(vision.resetDetection).toHaveBeenCalledOnce();
+      expect(screen.getByRole("button", { name: "Stop camera" })).toBeVisible();
     });
 
     it("places progress between the status and the controls in the overlay", async () => {

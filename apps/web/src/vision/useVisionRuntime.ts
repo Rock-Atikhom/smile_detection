@@ -13,6 +13,7 @@ export interface UseVisionRuntimeResult {
   prepare(): Promise<VisionStartResult>;
   restart(): Promise<VisionStartResult>;
   cancel(): void;
+  resetDetection(): void;
   submitFrame(command: VisionFrameCommand): boolean;
 }
 
@@ -48,6 +49,10 @@ export function useVisionRuntime(): UseVisionRuntimeResult {
     [],
   );
   const cancel = useCallback(() => coordinatorRef.current?.cancel(), []);
+  const resetDetection = useCallback(
+    () => coordinatorRef.current?.resetDetection(),
+    [],
+  );
   const submitFrame = useCallback((command: VisionFrameCommand) => {
     const coordinator = coordinatorRef.current;
     if (coordinator !== null) return coordinator.submitFrame(command);
@@ -59,5 +64,5 @@ export function useVisionRuntime(): UseVisionRuntimeResult {
     return false;
   }, []);
 
-  return { cancel, prepare, restart, snapshot, submitFrame };
+  return { cancel, prepare, resetDetection, restart, snapshot, submitFrame };
 }

@@ -1631,6 +1631,38 @@ describe("VisionCoordinator", () => {
       expect(snapshot().verification).toEqual(IDLE_VERIFICATION);
     });
 
+    it("starts a fresh detection without restarting the worker or accepting an old in-flight result", async () => {
+      const { clock, coordinator, snapshot, worker } =
+        await continuousHarness();
+      for (let i = 0; i < 130; i += 1) {
+        worker.dispatch(freshEvidence(i, clock.now));
+        clock.now += 40;
+      }
+      expect(snapshot().verification.phase).toBe("complete");
+
+      const oldParticipantFrame = frame(1_000);
+      expect(coordinator.submitFrame(oldParticipantFrame)).toBe(true);
+      coordinator.resetDetection();
+
+      expect(snapshot().continuity).toEqual(IDLE_CONTINUITY);
+      expect(snapshot().verification).toEqual(IDLE_VERIFICATION);
+
+      worker.dispatch(freshEvidence(1_000, clock.now));
+      expect(snapshot().continuity).toEqual(IDLE_CONTINUITY);
+      expect(snapshot().verification).toEqual(IDLE_VERIFICATION);
+
+      worker.dispatch(freshEvidence(1_001, clock.now));
+      expect(snapshot().continuity).toMatchObject({
+        state: "candidate",
+        consecutiveMatches: 1,
+      });
+      expect(snapshot().verification.phase).toBe("waiting");
+      expect(worker.terminate).not.toHaveBeenCalled();
+      expect(
+        worker.messages.filter((message) => message.type === "PREPARE"),
+      ).toHaveLength(1);
+    });
+
     it("clears continuity and verification on a newer camera generation", async () => {
       const { clock, coordinator, snapshot, workers } =
         await continuousHarness();

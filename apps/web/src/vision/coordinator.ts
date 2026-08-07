@@ -254,6 +254,7 @@ export class VisionCoordinator {
   private activeCameraGeneration: number | undefined;
   private inFlightFrame: FrameIdentity | undefined;
   private pendingFrame: VisionFrameCommand | undefined;
+  private suppressNextEvidence = false;
   private tracker = createFaceContinuityTracker();
   private verificationState = createSmileVerificationState();
   private lastRawScore: number | null = null;
@@ -330,6 +331,16 @@ export class VisionCoordinator {
       runtime: "idle",
       wasmTier: "unknown",
       face: idleFaceSnapshot(),
+      continuity: idleContinuitySnapshot(),
+      verification: idleVerificationSnapshot(),
+    });
+  }
+
+  resetDetection(): void {
+    if (this.disposed) return;
+    this.suppressNextEvidence = this.inFlightFrame !== undefined;
+    this.resetSemanticState();
+    this.publish({
       continuity: idleContinuitySnapshot(),
       verification: idleVerificationSnapshot(),
     });
@@ -664,6 +675,10 @@ export class VisionCoordinator {
     if (value.type === "FACE_EVIDENCE") {
       if (!active.ready || this.snapshotValue.runtime !== "ready") return;
       if (!this.settleFrame(active, value)) return;
+      if (this.suppressNextEvidence) {
+        this.suppressNextEvidence = false;
+        return;
+      }
       this.publishFaceEvidence(value);
       return;
     }
@@ -896,6 +911,7 @@ export class VisionCoordinator {
   private resetFrameAdmission(): void {
     this.activeCameraGeneration = undefined;
     this.inFlightFrame = undefined;
+    this.suppressNextEvidence = false;
     this.closePendingFrame();
   }
 

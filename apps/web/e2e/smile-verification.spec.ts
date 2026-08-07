@@ -570,6 +570,35 @@ test("exactly five thousand milliseconds reaches Smile verified", async ({
   await expect(progress).toHaveAttribute("max", "5000");
 });
 
+test("starts a new detection for the next person without restarting the camera", async ({
+  page,
+}) => {
+  await exposeSecondCamera(page);
+  await installSmileVerificationWorker(page);
+  const status = await openCamera(page);
+
+  await warmToReady(page);
+  for (let i = 0; i < 130; i += 1) await stepReady(page, 1);
+  await expect(status).toContainText("Smile verified");
+
+  const beforeReset = await page.evaluate(() =>
+    window.__smartSmileVerification?.facts(),
+  );
+  await page.getByRole("button", { name: "New detection" }).click();
+
+  await expect(status).toContainText("Face ready");
+  await expect(progressBar(page)).toBeHidden();
+  const afterReset = await page.evaluate(() =>
+    window.__smartSmileVerification?.facts(),
+  );
+  expect(afterReset?.latestCameraGeneration).toBe(
+    beforeReset?.latestCameraGeneration,
+  );
+
+  await warmToReady(page);
+  await expect(status).toContainText("Smile when you are ready");
+});
+
 test("stop and switch clear progress", async ({ page }) => {
   await exposeSecondCamera(page);
   await installSmileVerificationWorker(page);

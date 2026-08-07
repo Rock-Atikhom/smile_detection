@@ -25,6 +25,7 @@ function fakeCoordinator() {
     cancel: vi.fn(),
     dispose: vi.fn(),
     prepare: vi.fn(async () => "started" as const),
+    resetDetection: vi.fn(),
     restart: vi.fn(async () => "started" as const),
     submitFrame: vi.fn(() => true),
     snapshot: createInitialVisionSnapshot(),
@@ -60,6 +61,7 @@ describe("useVisionRuntime", () => {
     const actions = {
       cancel: current.cancel,
       prepare: current.prepare,
+      resetDetection: current.resetDetection,
       restart: current.restart,
       submitFrame: current.submitFrame,
     };
@@ -76,11 +78,13 @@ describe("useVisionRuntime", () => {
     expect(view.getByText("preparing")).toBeVisible();
     expect(current.cancel).toBe(actions.cancel);
     expect(current.prepare).toBe(actions.prepare);
+    expect(current.resetDetection).toBe(actions.resetDetection);
     expect(current.restart).toBe(actions.restart);
     expect(current.submitFrame).toBe(actions.submitFrame);
     await expect(current.prepare()).resolves.toBe("started");
     await expect(current.restart()).resolves.toBe("started");
     current.cancel();
+    current.resetDetection();
     const command = {
       type: "FRAME",
       generation: 0,
@@ -97,6 +101,7 @@ describe("useVisionRuntime", () => {
     expect(fake.coordinator.prepare).toHaveBeenCalledOnce();
     expect(fake.coordinator.restart).toHaveBeenCalledOnce();
     expect(fake.coordinator.cancel).toHaveBeenCalledOnce();
+    expect(fake.coordinator.resetDetection).toHaveBeenCalledOnce();
     expect(fake.coordinator.submitFrame).toHaveBeenCalledWith(command);
 
     view.unmount();

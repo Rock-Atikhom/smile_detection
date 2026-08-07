@@ -864,6 +864,13 @@ h1 {
   color: var(--overlay-stop-text);
 }
 
+.session-control--new {
+  grid-column: 1 / -1;
+  border: 1px solid rgb(170 255 211 / 0.55);
+  background: var(--overlay-switch);
+  color: var(--overlay-switch-text);
+}
+
 .session-control--switch {
   border: 1px solid transparent;
   background: var(--overlay-switch);
