@@ -1,0 +1,7 @@
+# Keep generated manifests and hashed vendored assets byte-stable on every OS.
+* text=auto eol=lf
+
+# Keep binary model/runtime files byte-for-byte unchanged on checkout.
+*.pdf binary
+*.task binary
+*.wasm binary
