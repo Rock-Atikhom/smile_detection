@@ -993,7 +993,11 @@ function createBrowserVisionWorker(): VisionWorkerPort {
   ).__smartSmileCreateVisionWorker;
   return typeof factory === "function"
     ? (factory as BrowserVisionWorkerFactory)()
-    : new Worker(new URL("./worker.ts", import.meta.url));
+    : import.meta.env.DEV
+      ? new Worker(new URL("./worker.ts", import.meta.url), {
+          type: "module",
+        })
+      : new Worker(new URL("./worker.ts", import.meta.url));
 }
 
 function createNetworkProbeUrl(manifestUrl: string): URL | undefined {

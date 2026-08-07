@@ -1408,10 +1408,14 @@ describe("VisionCoordinator", () => {
     expect(harness.coordinator.snapshot.generation).toBe(1);
   });
 
-  it("constructs the browser worker as classic with no module options", async () => {
+  it("uses a module worker in Vite development and a classic worker in builds", async () => {
     const worker = new FakeWorker();
-    const WorkerConstructor = vi.fn(function (url: URL) {
+    const WorkerConstructor = vi.fn(function (
+      url: URL,
+      options?: { type?: "classic" | "module" },
+    ) {
       void url;
+      void options;
       return worker;
     });
     vi.stubGlobal("Worker", WorkerConstructor);
@@ -1428,10 +1432,14 @@ describe("VisionCoordinator", () => {
     await expect(coordinator.prepare()).resolves.toBe("started");
 
     expect(WorkerConstructor).toHaveBeenCalledOnce();
-    expect(WorkerConstructor.mock.calls[0]).toHaveLength(1);
     expect(String(WorkerConstructor.mock.calls[0]?.[0])).toContain(
       "/vision/worker.ts",
     );
+    if (import.meta.env.DEV) {
+      expect(WorkerConstructor.mock.calls[0]?.[1]).toEqual({ type: "module" });
+    } else {
+      expect(WorkerConstructor.mock.calls[0]).toHaveLength(1);
+    }
     coordinator.dispose();
   });
 

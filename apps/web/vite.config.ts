@@ -11,6 +11,11 @@ export default defineConfig({
       strategies: "injectManifest",
       srcDir: "src/service-worker",
       filename: "sw.ts",
+      injectRegister: false,
+      devOptions: {
+        enabled: true,
+        type: "module",
+      },
       injectManifest: {
         globPatterns: ["**/*.{html,css,js,json,png,svg,ico}"],
         globIgnores: [

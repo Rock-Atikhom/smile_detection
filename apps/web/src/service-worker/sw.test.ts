@@ -47,14 +47,17 @@ function deferred<T>() {
   return { promise, reject, resolve };
 }
 
-async function loadWorker() {
+async function loadWorker(locationHref = "https://app.test/sw.js") {
   const listeners = new Map<string, Listener>();
   const workerScope = {
     __WB_MANIFEST: [{ url: "/index.html", revision: "shell" }],
     addEventListener: vi.fn((type: string, listener: Listener) => {
       listeners.set(type, listener);
     }),
-    location: { href: "https://app.test/sw.js", origin: "https://app.test" },
+    location: {
+      href: locationHref,
+      origin: new URL(locationHref).origin,
+    },
     registration: { scope: "https://app.test/" },
     skipWaiting: vi.fn(async () => undefined),
   };
@@ -102,7 +105,7 @@ describe("vision service worker", () => {
 
     expect(mocks.cleanupOutdatedCaches).toHaveBeenCalledOnce();
     expect(mocks.precacheAndRoute).toHaveBeenCalledWith(
-      workerScope.__WB_MANIFEST,
+      import.meta.env.DEV ? [] : workerScope.__WB_MANIFEST,
     );
     expect(mocks.cacheVisionRelease).not.toHaveBeenCalled();
     expect(mocks.clientsClaim).toHaveBeenCalledOnce();
@@ -365,6 +368,30 @@ describe("vision service worker", () => {
       },
     } as never);
     expect(responsePromise).toBeUndefined();
+  });
+
+  it("serves Vite development module imports from the verified cache", async () => {
+    const cached = new Response("cached", {
+      headers: { "content-type": "text/javascript" },
+    });
+    mocks.matchCompletedVisionAsset.mockResolvedValue(cached);
+    const { listeners } = await loadWorker("https://app.test/dev-sw.js?dev-sw");
+    const path = VISION_MANIFEST.assets[0]!.path;
+    let responsePromise: Promise<Response> | undefined;
+
+    listeners.get("fetch")!({
+      request: new Request(new URL(`${path}?import`, "https://app.test")),
+      respondWith: (promise: Promise<Response>) => {
+        responsePromise = promise;
+      },
+    } as never);
+
+    await expect(responsePromise).resolves.toBe(cached);
+    expect(mocks.matchCompletedVisionAsset).toHaveBeenCalledWith(
+      path,
+      VISION_MANIFEST.releaseId,
+      expect.any(Object),
+    );
   });
 
   it("never falls back to unverified network bytes for an immutable asset", async () => {

@@ -207,10 +207,24 @@ async function loadVerifiedAsset(
   }
 }
 
-function rolesForTier(tier: WasmTier): {
+function rolesForTier(
+  tier: WasmTier,
+  manifest: ReturnType<typeof parseVisionManifest>,
+): {
   binary: VisionAssetRole;
   loader: VisionAssetRole;
 } {
+  if (
+    import.meta.env.DEV &&
+    tier === "simd" &&
+    getAssetByRole(manifest, "wasm-loader-module-simd") !== undefined &&
+    getAssetByRole(manifest, "wasm-binary-module-simd") !== undefined
+  ) {
+    return {
+      binary: "wasm-binary-module-simd",
+      loader: "wasm-loader-module-simd",
+    };
+  }
   return tier === "simd"
     ? { binary: "wasm-binary-simd", loader: "wasm-loader-simd" }
     : {
@@ -226,7 +240,7 @@ async function constructTier(
   input: PrepareVisionRuntimeInput,
   dependencies: VisionRuntimeDependencies,
 ): Promise<PreparedVisionRuntime> {
-  const roles = rolesForTier(tier);
+  const roles = rolesForTier(tier, manifest);
   const loader = requireAsset(manifest, roles.loader);
   const binary = requireAsset(manifest, roles.binary);
   await Promise.all([

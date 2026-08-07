@@ -25,6 +25,11 @@ const assetBytes = {
   "wasm-binary-simd": new Uint8Array([51, 52, 53]),
 } satisfies Record<CriticalRole, Uint8Array>;
 
+const moduleAssetBytes = {
+  "wasm-loader-module-simd": new Uint8Array([61, 62, 63]),
+  "wasm-binary-module-simd": new Uint8Array([71, 72, 73]),
+} satisfies Record<ModuleRole, Uint8Array>;
+
 type CriticalRole = Extract<
   VisionAssetRole,
   | "face-landmarker-model"
@@ -34,12 +39,22 @@ type CriticalRole = Extract<
   | "wasm-binary-simd"
 >;
 
+type ModuleRole = Extract<
+  VisionAssetRole,
+  "wasm-loader-module-simd" | "wasm-binary-module-simd"
+>;
+
 const paths: Record<CriticalRole, string> = {
   "face-landmarker-model": `${VISION_RELEASE_PATH_PREFIX}face_landmarker.task`,
   "wasm-loader-baseline": `${VISION_RELEASE_PATH_PREFIX}vision_wasm_nosimd_internal.js`,
   "wasm-binary-baseline": `${VISION_RELEASE_PATH_PREFIX}vision_wasm_nosimd_internal.wasm`,
   "wasm-loader-simd": `${VISION_RELEASE_PATH_PREFIX}vision_wasm_internal.js`,
   "wasm-binary-simd": `${VISION_RELEASE_PATH_PREFIX}vision_wasm_internal.wasm`,
+};
+
+const modulePaths: Record<ModuleRole, string> = {
+  "wasm-loader-module-simd": `${VISION_RELEASE_PATH_PREFIX}vision_wasm_module_internal.js`,
+  "wasm-binary-module-simd": `${VISION_RELEASE_PATH_PREFIX}vision_wasm_module_internal.wasm`,
 };
 
 type PreparedLandmarkerFixture = Awaited<
@@ -71,20 +86,33 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   ).join("");
 }
 
-async function createManifest(): Promise<VisionReleaseManifest> {
+async function createManifest(
+  includeModuleAssets = false,
+): Promise<VisionReleaseManifest> {
+  const configuredAssetBytes: Partial<
+    Record<CriticalRole | ModuleRole, Uint8Array>
+  > = includeModuleAssets ? { ...assetBytes, ...moduleAssetBytes } : assetBytes;
   const assets = await Promise.all(
-    (Object.keys(assetBytes) as CriticalRole[]).map(
-      async (role): Promise<VisionAsset> => ({
-        bytes: assetBytes[role].byteLength,
-        id: role,
-        licenseRef: `${VISION_RELEASE_PATH_PREFIX}LICENSE-MediaPipe.txt`,
-        path: paths[role],
-        requiredForOffline: true,
-        role,
-        sha256: await sha256(assetBytes[role]),
-        source: `https://example.test/${role}`,
-        version: role === "face-landmarker-model" ? "float16/1" : "0.10.35",
-      }),
+    (Object.keys(configuredAssetBytes) as (CriticalRole | ModuleRole)[]).map(
+      async (role): Promise<VisionAsset> => {
+        const bytes = configuredAssetBytes[role];
+        if (bytes === undefined)
+          throw new Error(`Missing fixture bytes: ${role}`);
+        return {
+          bytes: bytes.byteLength,
+          id: role,
+          licenseRef: `${VISION_RELEASE_PATH_PREFIX}LICENSE-MediaPipe.txt`,
+          path:
+            role in paths
+              ? paths[role as CriticalRole]
+              : modulePaths[role as ModuleRole],
+          requiredForOffline: true,
+          role,
+          sha256: await sha256(bytes),
+          source: `https://example.test/${role}`,
+          version: role === "face-landmarker-model" ? "float16/1" : "0.10.35",
+        };
+      },
     ),
   );
 
@@ -99,6 +127,7 @@ async function createManifest(): Promise<VisionReleaseManifest> {
 
 async function createDependencies(options?: {
   downloadedManifest?: VisionReleaseManifest;
+  includeModuleAssets?: boolean;
   supportsSimd?: boolean;
   responseBytes?: Partial<Record<CriticalRole, Uint8Array>>;
 }): Promise<{
@@ -106,7 +135,7 @@ async function createDependencies(options?: {
   createLandmarker: ReturnType<typeof vi.fn>;
   fetch: ReturnType<typeof vi.fn>;
 }> {
-  const manifest = await createManifest();
+  const manifest = await createManifest(options?.includeModuleAssets);
   const byPath = new Map(manifest.assets.map((asset) => [asset.path, asset]));
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -117,10 +146,14 @@ async function createDependencies(options?: {
     if (asset === undefined) {
       return new Response(null, { status: 404 });
     }
-    const role = asset.role as CriticalRole;
+    const role = asset.role as CriticalRole | ModuleRole;
     return new Response(
-      Uint8Array.from(options?.responseBytes?.[role] ?? assetBytes[role])
-        .buffer,
+      Uint8Array.from(
+        options?.responseBytes?.[role as CriticalRole] ??
+          (role in assetBytes
+            ? assetBytes[role as CriticalRole]
+            : moduleAssetBytes[role as ModuleRole]),
+      ).buffer,
     );
   });
   const createLandmarker = vi.fn(async () => landmarkerFixture());
@@ -229,6 +262,22 @@ describe("prepareVisionRuntime", () => {
     expect(options?.baseOptions).not.toHaveProperty("modelAssetPath");
     expect(options?.baseOptions).not.toHaveProperty("delegate", "GPU");
     expect(onPhase.mock.calls).toEqual([["verifying"], ["initializing"]]);
+  });
+
+  it("uses the ES-module-compatible SIMD loader in Vite development", async () => {
+    const { createLandmarker, dependencies } = await createDependencies({
+      includeModuleAssets: true,
+    });
+
+    await prepare(dependencies);
+
+    expect(createLandmarker).toHaveBeenCalledWith(
+      {
+        wasmBinaryPath: modulePaths["wasm-binary-module-simd"],
+        wasmLoaderPath: modulePaths["wasm-loader-module-simd"],
+      },
+      expect.anything(),
+    );
   });
 
   it("verifies every selected critical response before construction", async () => {

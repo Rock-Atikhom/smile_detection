@@ -47,7 +47,10 @@ export interface ServiceWorkerContainerLike {
     listener: (event: MessageEvent<unknown>) => void,
   ): void;
   removeEventListener(type: "controllerchange", listener: () => void): void;
-  register(scriptURL: string): Promise<unknown>;
+  register(
+    scriptURL: string,
+    options?: { type?: "classic" | "module" },
+  ): Promise<unknown>;
 }
 
 export interface RegisterServiceWorkerDependencies {
@@ -68,6 +71,9 @@ interface ManagedVisionCacheClient extends VisionCacheClient {
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
+const SERVICE_WORKER_SCRIPT_URL = import.meta.env.DEV
+  ? "/dev-sw.js?dev-sw"
+  : "/sw.js";
 let requestSequence = 0;
 
 function nextRequestId(): string {
@@ -381,12 +387,10 @@ async function createApplicationServiceWorkerClient(
   if (serviceWorker === undefined) return undefined;
 
   try {
-    if (
-      !(await completesBeforeDeadline(
-        serviceWorker.register("/sw.js"),
-        deadline,
-      ))
-    ) {
+    const registration = import.meta.env.DEV
+      ? serviceWorker.register(SERVICE_WORKER_SCRIPT_URL, { type: "module" })
+      : serviceWorker.register(SERVICE_WORKER_SCRIPT_URL);
+    if (!(await completesBeforeDeadline(registration, deadline))) {
       return undefined;
     }
     const controller = await waitForVerifiedController(serviceWorker, deadline);

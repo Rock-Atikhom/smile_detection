@@ -322,7 +322,13 @@ describe("VisionCacheClient", () => {
     const pending = client.queryRelease({ generation: 3, releaseId });
     const sent = serviceWorker.posted[0]!;
 
-    expect(serviceWorker.register).toHaveBeenCalledWith("/sw.js");
+    if (import.meta.env.DEV) {
+      expect(serviceWorker.register).toHaveBeenCalledWith("/dev-sw.js?dev-sw", {
+        type: "module",
+      });
+    } else {
+      expect(serviceWorker.register).toHaveBeenCalledWith("/sw.js");
+    }
     expect(sent).toMatchObject({
       type: "QUERY_RELEASE",
       generation: 3,

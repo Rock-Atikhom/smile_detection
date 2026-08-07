@@ -35,6 +35,8 @@ declare let self: ServiceWorkerGlobalScope & {
 const immutableVisionPaths = new Set(
   VISION_MANIFEST.assets.map((asset) => asset.path),
 );
+const isViteDevelopmentWorker =
+  import.meta.env.DEV && new URL(self.location.href).pathname === "/dev-sw.js";
 const activeCacheRequests = new Map<string, Map<string, number>>();
 const cancelledCacheRequestIds = new Set<string>();
 
@@ -221,6 +223,8 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+  const isDevelopmentModuleImport =
+    isViteDevelopmentWorker && url.search === "?import";
   if (
     url.origin !== self.location.origin ||
     !url.pathname.startsWith(VISION_RELEASE_PATH_PREFIX)
@@ -230,7 +234,7 @@ self.addEventListener("fetch", (event) => {
 
   if (
     event.request.method !== "GET" ||
-    url.search !== "" ||
+    (url.search !== "" && !isDevelopmentModuleImport) ||
     !immutableVisionPaths.has(url.pathname)
   ) {
     event.respondWith(Promise.resolve(new Response(null, { status: 503 })));
@@ -241,7 +245,7 @@ self.addEventListener("fetch", (event) => {
     (async () => {
       try {
         const cached = await matchCompletedVisionAsset(
-          event.request,
+          isDevelopmentModuleImport ? url.pathname : event.request,
           VISION_MANIFEST.releaseId,
           dependencies,
         );

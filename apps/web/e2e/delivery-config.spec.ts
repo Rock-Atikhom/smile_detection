@@ -306,6 +306,12 @@ test("precaches the hashed application manifest but not vision release files", (
   expect(precacheUrls).not.toContainEqual(expect.stringMatching(/^vision\//));
 });
 
+test("enables the module service worker during Vite development", () => {
+  expect(viteConfig).toMatch(
+    /injectRegister:\s*false[\s\S]*devOptions:\s*\{\s*enabled:\s*true,\s*type:\s*["']module["']/s,
+  );
+});
+
 test("keeps future vision images outside the shell precache policy", () => {
   for (const path of [
     "vision/preview.png",
