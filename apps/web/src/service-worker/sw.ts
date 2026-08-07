@@ -32,11 +32,17 @@ declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<PrecacheEntry | string>;
 };
 
+function resolveWorkerPath(path: string): string {
+  return new URL(path.replace(/^\/+/, ""), self.registration.scope).pathname;
+}
+
 const immutableVisionPaths = new Set(
-  VISION_MANIFEST.assets.map((asset) => asset.path),
+  VISION_MANIFEST.assets.map((asset) => resolveWorkerPath(asset.path)),
 );
+const visionReleasePathPrefix = resolveWorkerPath(VISION_RELEASE_PATH_PREFIX);
 const isViteDevelopmentWorker =
-  import.meta.env.DEV && new URL(self.location.href).pathname === "/dev-sw.js";
+  import.meta.env.DEV &&
+  new URL(self.location.href).pathname === resolveWorkerPath("/dev-sw.js");
 const activeCacheRequests = new Map<string, Map<string, number>>();
 const cancelledCacheRequestIds = new Set<string>();
 
@@ -227,7 +233,7 @@ self.addEventListener("fetch", (event) => {
     isViteDevelopmentWorker && url.search === "?import";
   if (
     url.origin !== self.location.origin ||
-    !url.pathname.startsWith(VISION_RELEASE_PATH_PREFIX)
+    !url.pathname.startsWith(visionReleasePathPrefix)
   ) {
     return;
   }

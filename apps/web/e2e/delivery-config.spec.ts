@@ -652,7 +652,7 @@ test("keeps Cloudflare deployment downstream of the complete web gate", () => {
   );
 
   expect(workflow).toContain("deploy-pages:");
-  expect(workflow).toContain("needs: [web, macos-arm64]");
+  expect(workflow).toContain("needs: [web, web-windows, macos-arm64]");
   expect(workflow).toContain("CLOUDFLARE_PAGES_DEPLOY_ENABLED");
   expect(workflow).toContain("pages deploy apps/web/dist");
   expect(workflow).toContain(

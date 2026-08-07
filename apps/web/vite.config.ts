@@ -3,7 +3,13 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+const configuredBasePath = process.env.VITE_BASE_PATH?.trim() || "/";
+const basePath = configuredBasePath.endsWith("/")
+  ? configuredBasePath
+  : `${configuredBasePath}/`;
+
 export default defineConfig({
+  base: basePath,
   plugins: [
     react(),
     tailwindcss(),
@@ -12,6 +18,10 @@ export default defineConfig({
       srcDir: "src/service-worker",
       filename: "sw.ts",
       injectRegister: false,
+      manifest: {
+        scope: basePath,
+        start_url: basePath,
+      },
       devOptions: {
         enabled: true,
         type: "module",

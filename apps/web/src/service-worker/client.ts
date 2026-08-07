@@ -6,6 +6,7 @@ import {
   type VisionCacheEvent,
   type VisionServiceWorkerHandshakeCommand,
 } from "../vision/protocol";
+import { resolveAppPath } from "../app-path";
 
 export interface VisionCacheRequest {
   generation: number;
@@ -71,9 +72,12 @@ interface ManagedVisionCacheClient extends VisionCacheClient {
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
-const SERVICE_WORKER_SCRIPT_URL = import.meta.env.DEV
-  ? "/dev-sw.js?dev-sw"
-  : "/sw.js";
+const SERVICE_WORKER_SCRIPT_URL = resolveAppPath(
+  import.meta.env.DEV ? "/dev-sw.js" : "/sw.js",
+);
+const SERVICE_WORKER_REGISTRATION_URL = import.meta.env.DEV
+  ? `${SERVICE_WORKER_SCRIPT_URL}?dev-sw`
+  : SERVICE_WORKER_SCRIPT_URL;
 let requestSequence = 0;
 
 function nextRequestId(): string {
@@ -388,8 +392,10 @@ async function createApplicationServiceWorkerClient(
 
   try {
     const registration = import.meta.env.DEV
-      ? serviceWorker.register(SERVICE_WORKER_SCRIPT_URL, { type: "module" })
-      : serviceWorker.register(SERVICE_WORKER_SCRIPT_URL);
+      ? serviceWorker.register(SERVICE_WORKER_REGISTRATION_URL, {
+          type: "module",
+        })
+      : serviceWorker.register(SERVICE_WORKER_REGISTRATION_URL);
     if (!(await completesBeforeDeadline(registration, deadline))) {
       return undefined;
     }

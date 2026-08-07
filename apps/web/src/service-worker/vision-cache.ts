@@ -15,6 +15,8 @@ export const visionCacheName = (releaseId: string) =>
   `smart-smile-vision-${releaseId}`;
 export const completionUrl = (scope: string, releaseId: string) =>
   new URL(`__smart-smile/vision-complete/${releaseId}`, scope).href;
+export const visionAssetPath = (assetPath: string, scope: string) =>
+  new URL(assetPath.replace(/^\/+/, ""), scope).pathname;
 export type CompletionRecord = {
   schemaVersion: 1;
   releaseId: string;
@@ -363,7 +365,10 @@ async function allEntriesAreVerified(
   try {
     for (const asset of dependencies.manifest.assets) {
       if (signal !== undefined) ensureNotCancelled(signal);
-      const cached = await matchCache(cache, asset.path);
+      const cached = await matchCache(
+        cache,
+        visionAssetPath(asset.path, dependencies.scope),
+      );
       if (signal !== undefined) ensureNotCancelled(signal);
       if (cached === undefined) return false;
       await (dependencies.verifyResponse ?? verifyVisionResponse)(
@@ -460,7 +465,8 @@ async function storeAsset(
   signal: AbortSignal,
 ): Promise<void> {
   ensureNotCancelled(signal);
-  const upstream = await dependencies.fetch(asset.path, fetchOptions(signal));
+  const assetPath = visionAssetPath(asset.path, dependencies.scope);
+  const upstream = await dependencies.fetch(assetPath, fetchOptions(signal));
   const bytes = await (dependencies.verifyResponse ?? verifyVisionResponse)(
     upstream,
     asset,
@@ -470,7 +476,7 @@ async function storeAsset(
   responseBytes.set(bytes);
   await putCache(
     cache,
-    asset.path,
+    assetPath,
     new Response(responseBytes.buffer, {
       headers: safeHeaders(upstream.headers),
       status: 200,
@@ -617,7 +623,9 @@ export async function matchCompletedVisionAsset(
         ? request
         : new URL(request.url);
   const asset = dependencies.manifest.assets.find(
-    (candidate) => candidate.path === requestUrl.pathname,
+    (candidate) =>
+      visionAssetPath(candidate.path, dependencies.scope) ===
+      requestUrl.pathname,
   );
   if (asset === undefined) return undefined;
   const cached = await matchCache(cache, request);

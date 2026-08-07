@@ -47,7 +47,10 @@ function deferred<T>() {
   return { promise, reject, resolve };
 }
 
-async function loadWorker(locationHref = "https://app.test/sw.js") {
+async function loadWorker(
+  locationHref = "https://app.test/sw.js",
+  registrationScope = "https://app.test/",
+) {
   const listeners = new Map<string, Listener>();
   const workerScope = {
     __WB_MANIFEST: [{ url: "/index.html", revision: "shell" }],
@@ -58,7 +61,7 @@ async function loadWorker(locationHref = "https://app.test/sw.js") {
       href: locationHref,
       origin: new URL(locationHref).origin,
     },
-    registration: { scope: "https://app.test/" },
+    registration: { scope: registrationScope },
     skipWaiting: vi.fn(async () => undefined),
   };
   vi.stubGlobal("self", workerScope);
@@ -389,6 +392,32 @@ describe("vision service worker", () => {
     await expect(responsePromise).resolves.toBe(cached);
     expect(mocks.matchCompletedVisionAsset).toHaveBeenCalledWith(
       path,
+      VISION_MANIFEST.releaseId,
+      expect.any(Object),
+    );
+  });
+
+  it("routes project-site vision assets inside the registration scope", async () => {
+    const cached = new Response("cached", {
+      headers: { "content-type": "text/javascript" },
+    });
+    mocks.matchCompletedVisionAsset.mockResolvedValue(cached);
+    const scope = "https://app.test/smart_smile/";
+    const { listeners } = await loadWorker(`${scope}sw.js`, scope);
+    const canonicalPath = VISION_MANIFEST.assets[0]!.path;
+    const scopedPath = new URL(canonicalPath.slice(1), scope).pathname;
+    let responsePromise: Promise<Response> | undefined;
+
+    listeners.get("fetch")!({
+      request: new Request(new URL(scopedPath, "https://app.test")),
+      respondWith: (promise: Promise<Response>) => {
+        responsePromise = promise;
+      },
+    } as never);
+
+    await expect(responsePromise).resolves.toBe(cached);
+    expect(mocks.matchCompletedVisionAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ url: `https://app.test${scopedPath}` }),
       VISION_MANIFEST.releaseId,
       expect.any(Object),
     );

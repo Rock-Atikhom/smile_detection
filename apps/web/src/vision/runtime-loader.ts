@@ -5,6 +5,7 @@ import {
   VisionAssetError,
   VisionAssetOperationalError,
 } from "./integrity";
+import { resolveAppPath } from "../app-path";
 import {
   getAssetByRole,
   parseVisionManifest,
@@ -180,7 +181,11 @@ async function loadVerifiedAsset(
   signal: AbortSignal,
   dependencies: VisionRuntimeDependencies,
 ): Promise<Uint8Array> {
-  const response = await fetchResponse(asset.path, signal, dependencies);
+  const response = await fetchResponse(
+    resolveAppPath(asset.path),
+    signal,
+    dependencies,
+  );
   throwIfCancelled(signal);
   try {
     const bytes = await verifyVisionResponse(response, asset, {
@@ -250,8 +255,8 @@ async function constructTier(
   throwIfCancelled(input.signal);
 
   const fileset: WasmFileset = {
-    wasmBinaryPath: binary.path,
-    wasmLoaderPath: loader.path,
+    wasmBinaryPath: resolveAppPath(binary.path),
+    wasmLoaderPath: resolveAppPath(loader.path),
   };
   const options: FaceLandmarkerOptions = {
     baseOptions: { delegate: "CPU", modelAssetBuffer },

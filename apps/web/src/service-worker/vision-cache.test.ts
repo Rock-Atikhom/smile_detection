@@ -13,6 +13,7 @@ import {
   matchCompletedVisionAsset,
   queryVisionRelease,
   visionCacheName,
+  visionAssetPath,
   type CacheLike,
   type CacheStorageLike,
   type VisionCacheDependencies,
@@ -58,6 +59,14 @@ const secondAsset = asset(
   "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/b-notice.txt",
   new TextEncoder().encode("notice"),
 );
+
+it("resolves canonical vision assets inside a project-site service-worker scope", () => {
+  expect(
+    visionAssetPath(firstAsset.path, "https://app.test/smart_smile/"),
+  ).toBe(
+    "/smart_smile/vision/mediapipe-0.10.35-face-landmarker-float16-v1/a-license.txt",
+  );
+});
 
 function manifest(assets: VisionAsset[] = [firstAsset]): VisionReleaseManifest {
   return {
