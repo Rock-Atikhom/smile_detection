@@ -908,6 +908,11 @@ export class VisionCoordinator {
     if (cameraGeneration === this.activeCameraGeneration) return true;
 
     this.activeCameraGeneration = cameraGeneration;
+    // The previous camera's unanswered in-flight frame must not starve the new
+    // camera: its answer, if it ever arrives, is rejected by the tuple
+    // mismatch in settleFrame, so holding it here would only deadlock the
+    // frame pipeline behind a response that may never come.
+    this.inFlightFrame = undefined;
     this.closePendingFrame();
     this.resetSemanticState();
     this.publish({

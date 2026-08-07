@@ -491,7 +491,7 @@ describe("VisionCoordinator", () => {
     expect(harness.snapshot().face.staleResults).toBe(1);
   });
 
-  it("holds a new camera generation until the old in-flight tuple settles", async () => {
+  it("transfers a new camera generation without waiting for the old in-flight answer", async () => {
     const harness = createHarness({ now: () => 1_000 });
     const worker = await readyWorker(harness);
     worker.postMessage.mockClear();
@@ -500,11 +500,14 @@ describe("VisionCoordinator", () => {
 
     expect(harness.coordinator.submitFrame(oldFrame)).toBe(true);
     expect(harness.coordinator.submitFrame(nextCameraFrame)).toBe(true);
-    worker.dispatch(faceEvidence({ cameraGeneration: 0, sequence: 0 }));
-
+    expect(worker.postMessage).toHaveBeenCalledTimes(2);
     expect(worker.postMessage).toHaveBeenLastCalledWith(nextCameraFrame, [
       nextCameraFrame.bitmap,
     ]);
+
+    worker.dispatch(faceEvidence({ cameraGeneration: 0, sequence: 0 }));
+
+    expect(worker.postMessage).toHaveBeenCalledTimes(2);
     expect(harness.snapshot().face).toMatchObject({
       state: "detecting",
       guidance: null,
@@ -535,14 +538,15 @@ describe("VisionCoordinator", () => {
     const harness = createHarness({ now: () => 1_000 });
     const worker = await readyWorker(harness);
     worker.postMessage.mockClear();
-    const oldFrame = frame(0);
-    const nextCameraFrame = frame(0, 0, bitmap(), 1);
+    const inFlightFrame = frame(0);
+    const pending = frame(1);
 
-    harness.coordinator.submitFrame(oldFrame);
-    harness.coordinator.submitFrame(nextCameraFrame);
+    harness.coordinator.submitFrame(inFlightFrame);
+    harness.coordinator.submitFrame(pending);
     worker.dispatch(faceEvidence({ cameraGeneration: 1, sequence: 0 }));
 
     expect(worker.postMessage).toHaveBeenCalledTimes(1);
+    expect(pending.bitmap.close).not.toHaveBeenCalled();
     expect(harness.snapshot().face).toMatchObject({
       state: "detecting",
       guidance: null,
