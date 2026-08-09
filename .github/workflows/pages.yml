@@ -16,6 +16,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+      pages: read
 
     steps:
       - name: Check out repository
@@ -35,7 +36,7 @@ jobs:
 
       - name: Configure GitHub Pages
         id: pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Verify vendored vision release
         run: npm run web:vision:check
@@ -60,10 +61,23 @@ jobs:
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
 
+      - name: Archive GitHub Pages artifact
+        run: >-
+          tar --dereference --hard-dereference
+          --directory apps/web/dist
+          -cvf "${RUNNER_TEMP}/artifact.tar"
+          --exclude=.git
+          --exclude=.github
+          --exclude=".[^/]*"
+          .
+
       - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          path: apps/web/dist
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: 1
+          if-no-files-found: error
 
   deploy:
     name: Publish GitHub Pages site
@@ -80,4 +94,4 @@ jobs:
     steps:
       - name: Deploy GitHub Pages artifact
         id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.0
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
