@@ -32,6 +32,27 @@ npm run web:build
 npm run web:preview
 ```
 
+### Windows local setup
+
+Use Node.js `22.22.2` and run the following commands in PowerShell from the directory where
+you keep projects:
+
+```powershell
+git clone https://github.com/v89intern-superai/smart_smile.git smart_smile-windows
+cd smart_smile-windows
+npm install --global npm@10.9.7
+npm ci
+npm run web:vision:check
+npm run web:dev
+```
+
+Open the localhost URL printed by Vite and allow camera access in the browser. If this project
+was cloned on Windows before the repository added its cross-platform line-ending rules, a
+normal `git pull` can leave the vendored vision files as CRLF and produce a false "manifest is
+out of date" error. Do **not** regenerate the manifest in that situation; clone the latest
+`main` branch into a new folder using the commands above. If an older Smart Smile screen still
+appears afterward, clear the browser's site data for localhost once and reopen the Vite URL.
+
 Run the complete web quality gates with:
 
 ```bash

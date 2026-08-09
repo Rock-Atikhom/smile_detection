@@ -23,6 +23,7 @@ const manifestPath = join(
   "generated",
   "release-manifest.json",
 );
+let releaseContainsCrlf = false;
 
 const manifestAssets = await Promise.all(
   configuredAssets.map(async (configured) => {
@@ -31,6 +32,9 @@ const manifestAssets = await Promise.all(
       readFile(filePath),
       stat(filePath),
     ]);
+    if (configured.destination.endsWith(".js") && bytes.includes("\r\n")) {
+      releaseContainsCrlf = true;
+    }
     return {
       bytes: fileStat.size,
       id: configured.role,
@@ -72,9 +76,16 @@ if (process.argv.includes("--check")) {
     process.exitCode = 1;
   }
   if (current !== undefined && current !== output) {
-    console.error(
-      "Vision release manifest is out of date. Run npm run vision:manifest.",
-    );
+    if (releaseContainsCrlf || current.includes("\r\n")) {
+      console.error(
+        "Vision release files use CRLF line endings from an older Windows checkout.\n" +
+          "Do not regenerate the manifest. Create a fresh clone of the latest main branch, then run npm ci and npm run web:vision:check.",
+      );
+    } else {
+      console.error(
+        "Vision release manifest is out of date. Run npm run vision:manifest.",
+      );
+    }
     process.exitCode = 1;
   }
 } else {
