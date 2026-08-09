@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { contrast, parseCssColor, type Rgb } from "./color";
 
 const viewports = [
   { name: "portrait-390x844", width: 390, height: 844 },
@@ -247,37 +248,21 @@ test("preserves Ticket 01 privacy trigger non-text contrast", async ({
   page,
 }) => {
   await page.goto("/");
-  const contrasts = await page
+  const colors = await page
     .getByRole("button", { name: "How privacy works" })
     .evaluate((element) => {
-      const toRgb = (value: string) =>
-        value
-          .match(/[\d.]+/g)
-          ?.slice(0, 3)
-          .map(Number) ?? [];
-      const luminance = (value: string) => {
-        const [red, green, blue] = toRgb(value).map((channel) => {
-          const normalized = channel / 255;
-          return normalized <= 0.04045
-            ? normalized / 12.92
-            : ((normalized + 0.055) / 1.055) ** 2.4;
-        });
-        return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-      };
-      const contrast = (first: number, second: number) =>
-        (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
       const styles = getComputedStyle(element);
-      const border = luminance(styles.borderTopColor);
       return {
-        interior: contrast(border, luminance(styles.backgroundColor)),
-        exterior: contrast(
-          border,
-          luminance(getComputedStyle(document.documentElement).backgroundColor),
-        ),
+        background: styles.backgroundColor,
+        border: styles.borderTopColor,
+        canvas: getComputedStyle(document.documentElement).backgroundColor,
       };
     });
-  expect(contrasts.interior).toBeGreaterThanOrEqual(3);
-  expect(contrasts.exterior).toBeGreaterThanOrEqual(3);
+  const border = parseCssColor(colors.border).slice(0, 3) as Rgb;
+  const background = parseCssColor(colors.background).slice(0, 3) as Rgb;
+  const canvas = parseCssColor(colors.canvas).slice(0, 3) as Rgb;
+  expect(contrast(border, background)).toBeGreaterThanOrEqual(3);
+  expect(contrast(border, canvas)).toBeGreaterThanOrEqual(3);
 });
 
 test("does not request camera before the explicit privacy action", async ({
@@ -490,6 +475,33 @@ test("reflows camera actions at the 360 by 225 CSS viewport produced by 400 perc
       ),
     )
     .toBe(true);
+});
+
+test("keeps narrow-screen actions on one line with clipped page overflow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/");
+
+  for (const name of [
+    "Continue to camera",
+    "Help & system status",
+    "How privacy works",
+  ]) {
+    await expect(page.getByRole("button", { name })).toHaveCSS(
+      "white-space",
+      "nowrap",
+    );
+  }
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        bodyOverflowX: getComputedStyle(document.body).overflowX,
+        documentOverflowX: getComputedStyle(document.documentElement).overflowX,
+      })),
+    )
+    .toEqual({ bodyOverflowX: "clip", documentOverflowX: "clip" });
 });
 
 for (const viewport of [

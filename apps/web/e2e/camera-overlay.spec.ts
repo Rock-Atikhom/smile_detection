@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { contrast, parseCssColor, type Rgb } from "./color";
 
 async function exposeSecondCamera(page: Page) {
   await page.addInitScript(() => {
@@ -206,31 +207,6 @@ test("uses the approved keyboard order in the active session", async ({
   }
 });
 
-function linearChannel(channel: number) {
-  const value = channel / 255;
-  return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-}
-
-function luminance([red, green, blue]: [number, number, number]) {
-  return (
-    0.2126 * linearChannel(red) +
-    0.7152 * linearChannel(green) +
-    0.0722 * linearChannel(blue)
-  );
-}
-
-function contrast(
-  first: [number, number, number],
-  second: [number, number, number],
-) {
-  const firstLuminance = luminance(first);
-  const secondLuminance = luminance(second);
-  return (
-    (Math.max(firstLuminance, secondLuminance) + 0.05) /
-    (Math.min(firstLuminance, secondLuminance) + 0.05)
-  );
-}
-
 test("protects overlay text against light and dark camera frames and removes motion", async ({
   page,
 }) => {
@@ -245,11 +221,11 @@ test("protects overlay text against light and dark camera frames and removes mot
     ".system-status-trigger--overlay",
     ".wordmark--overlay",
   ]) {
-    const scrim = await page.locator(selector).evaluate((element) => {
-      const match = getComputedStyle(element).backgroundColor.match(/[\d.]+/g);
-      return match?.map(Number) ?? [];
-    });
-    expect(scrim).toHaveLength(4);
+    const scrim = parseCssColor(
+      await page
+        .locator(selector)
+        .evaluate((element) => getComputedStyle(element).backgroundColor),
+    );
     const [red, green, blue, alpha] = scrim;
     expect(alpha).toBeGreaterThanOrEqual(0.8);
 
@@ -272,18 +248,15 @@ test("protects overlay text against light and dark camera frames and removes mot
   ]) {
     const colors = await page.locator(selector).evaluate((element) => {
       const styles = getComputedStyle(element);
-      const parse = (value: string) =>
-        (value
-          .match(/[\d.]+/g)
-          ?.slice(0, 3)
-          .map(Number) ?? []) as [number, number, number];
       return {
-        background: parse(styles.backgroundColor),
-        foreground: parse(styles.color),
+        background: styles.backgroundColor,
+        foreground: styles.color,
       };
     });
+    const background = parseCssColor(colors.background);
+    const foreground = parseCssColor(colors.foreground);
     expect(
-      contrast(colors.foreground, colors.background),
+      contrast(foreground.slice(0, 3) as Rgb, background.slice(0, 3) as Rgb),
     ).toBeGreaterThanOrEqual(4.5);
   }
 
