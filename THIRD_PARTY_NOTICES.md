@@ -1,10 +1,11 @@
 # Third-party notices
 
-## MediaPipe Tasks Vision and Face Landmarker release
+## MediaPipe Tasks Vision, Face Landmarker, and Selfie Segmenter release
 
 Smart Smile redistributes the self-hosted MediaPipe Tasks Vision runtime
-`@mediapipe/tasks-vision@0.10.35` and the official Face Landmarker model
-`float16/1` as release `6c23e451b7a9b523`. The immutable release inventory,
+`@mediapipe/tasks-vision@0.10.35`, the official Face Landmarker model
+`float16/1`, and the official Selfie Segmenter model as release
+`c8e4fbace24ccdb3`. The immutable release inventory,
 SHA-256 values, byte counts, and per-asset provenance are in
 `apps/web/src/vision/generated/release-manifest.json`.
 
@@ -14,6 +15,8 @@ SHA-256 values, byte counts, and per-asset provenance are in
 - MediaPipe license: <https://raw.githubusercontent.com/google-ai-edge/mediapipe/v0.10.35/LICENSE>
 - Face Landmarker model bundle:
   <https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task>
+- Selfie Segmenter model bundle:
+  <https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite>
 - BlazeFace Short Range model card:
   <https://storage.googleapis.com/mediapipe-assets/MediaPipe%20BlazeFace%20Model%20Card%20%28Short%20Range%29.pdf>
 - Face Mesh V2 model card:

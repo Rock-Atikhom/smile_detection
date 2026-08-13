@@ -33,7 +33,7 @@ project and credentials are configured.
 
 Ticket 03's automated browser acceptance initializes the self-hosted
 `@mediapipe/tasks-vision@0.10.35` / Face Landmarker `float16/1` release from
-same-origin assets, verifies the manifest release ID `6c23e451b7a9b523`, and
+same-origin assets, verifies the manifest release ID `c8e4fbace24ccdb3`, and
 proves an online setup can close and reopen offline. It also covers the
 shell-only first-use-offline recovery, integrity failure, incomplete-cache
 rollback, the allowlisted static-cache inventory, and production CSP. This is a

@@ -552,7 +552,7 @@ test("replacement during grace cannot inherit progress and expiry resets", async
   await expect(progressBar(page)).toBeHidden();
 });
 
-test("exactly five thousand milliseconds reaches Smile verified", async ({
+test("exactly three thousand milliseconds reaches Smile verified", async ({
   page,
 }) => {
   await exposeSecondCamera(page);
@@ -567,7 +567,30 @@ test("exactly five thousand milliseconds reaches Smile verified", async ({
   await expect(status).toContainText("Smile verified");
   const progress = progressBar(page);
   await expect(progress).toBeVisible();
-  await expect(progress).toHaveAttribute("max", "5000");
+  await expect(progress).toHaveAttribute("max", "3000");
+  await expect(
+    page.getByRole("heading", { name: "Choose your photo" }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.getByRole("button", { name: "Original room" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Warm studio" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sky blue" })).toBeVisible();
+  await page.getByRole("button", { name: "Warm studio" }).click();
+  await page.getByRole("button", { name: "Use this photo" }).click();
+  await page.getByLabel("Email address").fill("participant@example.com");
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Send photo" }).click();
+  await expect(page.getByRole("heading", { name: "Photo sent" })).toBeVisible();
+  await expect(page.getByText("Demo mode is active")).toBeVisible();
+
+  await page.getByRole("button", { name: "New participant" }).click();
+  await warmToReady(page);
+  for (let i = 0; i < 130; i += 1) await stepReady(page, 1);
+  await expect(
+    page.getByRole("heading", { name: "Choose your photo" }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByLabel("Email address")).toBeHidden();
 });
 
 test("starts a new detection for the next person without restarting the camera", async ({
@@ -584,7 +607,7 @@ test("starts a new detection for the next person without restarting the camera",
   const beforeReset = await page.evaluate(() =>
     window.__smartSmileVerification?.facts(),
   );
-  await page.getByRole("button", { name: "New detection" }).click();
+  await page.getByRole("button", { name: "Retake" }).click();
 
   await expect(status).toContainText("Face ready");
   await expect(progressBar(page)).toBeHidden();

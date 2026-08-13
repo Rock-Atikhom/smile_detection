@@ -17,7 +17,7 @@ Ticket 03 adds a verified runtime-initialization path only. It pins
 `@mediapipe/tasks-vision@0.10.35` and the official Face Landmarker model
 `float16/1`. The deterministic release manifest is
 `apps/web/src/vision/generated/release-manifest.json`; its current release ID is
-`6c23e451b7a9b523`, and it inventories byte counts, SHA-256 values, provenance,
+`c8e4fbace24ccdb3`, and it inventories byte counts, SHA-256 values, provenance,
 license references, and every same-origin immutable asset beneath
 `apps/web/public/vision/mediapipe-0.10.35-face-landmarker-float16-v1/`.
 

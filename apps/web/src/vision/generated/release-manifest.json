@@ -12,13 +12,13 @@
       "version": "0.10.35"
     },
     {
-      "bytes": 903,
+      "bytes": 1094,
       "id": "notice",
       "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
       "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/NOTICE.txt",
       "requiredForOffline": true,
       "role": "notice",
-      "sha256": "fb05007d63ce970b042c584c0c653d355b9f7322a987fca050cf452d3efd7afa",
+      "sha256": "7eecbd55a5b35559fbc75ef763cd766306f814dfb343633dc49da743aeeda4e8",
       "source": "https://github.com/google-ai-edge/mediapipe/tree/v0.10.35",
       "version": "0.10.35"
     },
@@ -65,6 +65,17 @@
       "sha256": "c6add060f4ebfb37b2690136b6c711c7e5fcb7038baa2649ae3338b83979565a",
       "source": "https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf",
       "version": "0.10.35"
+    },
+    {
+      "bytes": 249537,
+      "id": "selfie-segmentation-model",
+      "licenseRef": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/LICENSE-MediaPipe.txt",
+      "path": "/vision/mediapipe-0.10.35-face-landmarker-float16-v1/selfie_segmenter.tflite",
+      "requiredForOffline": true,
+      "role": "selfie-segmentation-model",
+      "sha256": "191ac9529ae506ee0beefa6b2c945a172dab9d07d1e802a290a4e4038226658b",
+      "source": "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
+      "version": "float16/latest"
     },
     {
       "bytes": 322044,
@@ -136,5 +147,5 @@
   "modelVersion": "float16/1",
   "runtimeVersion": "0.10.35",
   "schemaVersion": 1,
-  "releaseId": "6c23e451b7a9b523"
+  "releaseId": "c8e4fbace24ccdb3"
 }

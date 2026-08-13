@@ -70,7 +70,7 @@ const vision = vi.hoisted(() => ({
       | "runtime-cancelled"
       | "offline-cache-failed"
       | null,
-    releaseId: "6c23e451b7a9b523",
+    releaseId: "c8e4fbace24ccdb3",
     retryAvailable: false,
     runtime: "ready" as "idle" | "preparing" | "ready" | "error",
     wasmTier: "simd" as "unknown" | "simd" | "baseline",
@@ -143,7 +143,7 @@ function resetVision() {
     offlineCache: "ready",
     phase: null,
     reason: null,
-    releaseId: "6c23e451b7a9b523",
+    releaseId: "c8e4fbace24ccdb3",
     retryAvailable: false,
     runtime: "ready",
     wasmTier: "simd",
@@ -889,7 +889,7 @@ describe("Smart Smile camera session", () => {
     });
     fireEvent.click(trigger);
     const dialog = screen.getByRole("dialog", { name: "Help & system status" });
-    expect(dialog).toHaveTextContent("Manifest ID6c23e451b7a9b523");
+    expect(dialog).toHaveTextContent("Manifest IDc8e4fbace24ccdb3");
     expect(dialog).toHaveTextContent("WASM tierSIMD");
     expect(dialog).not.toHaveTextContent("Private webcam name");
     expect(dialog).not.toHaveTextContent("opaque-id");
@@ -955,7 +955,7 @@ describe("Smart Smile camera session", () => {
     fireEvent.click(help);
     expect(
       screen.getByRole("dialog", { name: "Help & system status" }),
-    ).toHaveTextContent("Manifest ID6c23e451b7a9b523");
+    ).toHaveTextContent("Manifest IDc8e4fbace24ccdb3");
     fireEvent.click(
       screen.getByRole("button", { name: "Close system status" }),
     );
@@ -1065,7 +1065,7 @@ describe("Smart Smile camera session", () => {
     expect(offlineRow).toHaveTextContent("Ready");
     expect(dialog).toHaveTextContent("MediaPipe0.10.35");
     expect(dialog).toHaveTextContent("Modelface_landmarker float16/1");
-    expect(dialog).toHaveTextContent("Manifest ID6c23e451b7a9b523");
+    expect(dialog).toHaveTextContent("Manifest IDc8e4fbace24ccdb3");
     expect(dialog).toHaveTextContent("WASM tierBaseline");
 
     Object.assign(vision.snapshot, {
@@ -1319,7 +1319,7 @@ describe("Smart Smile camera session", () => {
           graceRemainingMs: opts.graceRemainingMs ?? null,
           phase: opts.phase ?? "waiting",
           progressMs: opts.progressMs ?? 0,
-          progressRatio: (opts.progressMs ?? 0) / 5000,
+          progressRatio: (opts.progressMs ?? 0) / 3000,
           rawScore: opts.rawScore ?? null,
           reason: opts.reason ?? "none",
           smileValid: opts.smileValid ?? false,
@@ -1397,7 +1397,7 @@ describe("Smart Smile camera session", () => {
       const progress = screen.getByRole("progressbar", {
         name: "Smile verification progress",
       });
-      expect(progress).toHaveAttribute("max", "5000");
+      expect(progress).toHaveAttribute("max", "3000");
       expect(Number(progress.getAttribute("value"))).toBe(1250);
       expect(
         screen.getByText(
@@ -1434,15 +1434,15 @@ describe("Smart Smile camera session", () => {
       setSmile({
         continuity: "ready",
         phase: "complete",
-        progressMs: 5000,
+        progressMs: 3000,
       });
       view.rerender(<App />);
 
       const progress = screen.getByRole("progressbar", {
         name: "Smile verification progress",
       });
-      expect(progress).toHaveAttribute("max", "5000");
-      expect(progress).toHaveAttribute("value", "5000");
+      expect(progress).toHaveAttribute("max", "3000");
+      expect(progress).toHaveAttribute("value", "3000");
       expect(screen.getByText("Smile verification complete")).toBeVisible();
       expect(
         screen.getByRole("status", { name: "Camera status" }),
@@ -1455,7 +1455,7 @@ describe("Smart Smile camera session", () => {
       setSmile({
         continuity: "ready",
         phase: "complete",
-        progressMs: 5000,
+        progressMs: 3000,
       });
       view.rerender(<App />);
 

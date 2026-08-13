@@ -77,6 +77,7 @@ describe("immutable vision release manifest", () => {
     ]);
     expect(remoteAssets.map(({ destination }) => destination)).toEqual([
       "face_landmarker.task",
+      "selfie_segmenter.tflite",
       "LICENSE-MediaPipe.txt",
       "model-card-blazeface-short-range.pdf",
       "model-card-face-mesh-v2.pdf",

@@ -188,14 +188,14 @@ describe("advanceSmileVerification", () => {
     expect(state.progressMs).toBe(0);
   });
 
-  it("completes after exactly 5,000ms of accumulated valid intervals", () => {
+  it("completes after exactly 3,000ms of accumulated valid intervals", () => {
     const state = advanceValidSequence(
       createSmileVerificationState(),
       1_000,
-      53,
+      33,
     );
     expect(state.phase).toBe("complete");
-    expect(state.progressMs).toBe(5_000);
+    expect(state.progressMs).toBe(3_000);
   });
 
   it("ignores non-finite and non-increasing timestamps", () => {

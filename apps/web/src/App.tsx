@@ -1,4 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
+import { CaptureJourney } from "./CaptureJourney";
 import {
   useCallback,
   useEffect,
@@ -841,6 +842,13 @@ export default function App() {
                 ref={videoRef}
               />
               <div aria-hidden="true" className="capture-zone" />
+              <CaptureJourney
+                hasContinuity={vision.snapshot.continuity.state === "ready"}
+                isSingleFace={vision.snapshot.face.faceCount === 1}
+                isSmileVerified={smileProgress.phase === "complete"}
+                onResetDetection={runNewDetection}
+                videoRef={videoRef}
+              />
               {sessionOverlayVisible && (
                 <section
                   aria-label="Live camera controls"

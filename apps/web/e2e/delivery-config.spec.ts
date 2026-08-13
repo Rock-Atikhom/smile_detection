@@ -356,7 +356,7 @@ test("tracks the complete offline vision architecture boundary", () => {
     \`@mediapipe/tasks-vision@0.10.35\` and the official Face Landmarker model
     \`float16/1\`. The deterministic release manifest is
     \`apps/web/src/vision/generated/release-manifest.json\`; its current release ID is
-    \`6c23e451b7a9b523\`, and it inventories byte counts, SHA-256 values, provenance,
+    \`c8e4fbace24ccdb3\`, and it inventories byte counts, SHA-256 values, provenance,
     license references, and every same-origin immutable asset beneath
     \`apps/web/public/vision/mediapipe-0.10.35-face-landmarker-float16-v1/\`.`,
     `- The main-thread \`VisionCoordinator\` owns explicit-camera-intent start,
@@ -410,10 +410,8 @@ test("tracks the complete offline vision architecture boundary", () => {
 test("tracks the complete non-goal and persistence boundary", () => {
   expectDocumentedClause(
     rootReadme,
-    `Ticket 03 prepares a self-hosted, on-device vision runtime; it stops at runtime
-    initialization and verified offline reopening. It does not submit camera frames,
-    extract landmarks or blendshapes for the application, or detect smiles. No
-    dataset is collected and no custom model is trained.`,
+    `Local development uses a safe demo delivery mode by default; it never sends the photo and
+    the completion message says so. To enable real delivery, build the web app with:`,
   );
 
   for (const clause of [
@@ -426,9 +424,10 @@ test("tracks the complete non-goal and persistence boundary", () => {
     `The persisted static allowlist is exact: the Workbox shell cache may contain the
     hashed application shell, PWA icons, static recovery help, and the generated
     release-manifest metadata; the separate versioned vision cache may contain only
-    the immutable manifest paths for release \`6c23e451b7a9b523\` plus its matching
+    the immutable manifest paths for release \`c8e4fbace24ccdb3\` plus its matching
     completion-marker record. That release is MediaPipe runtime/WASM files, the
-    Face Landmarker \`float16/1\` task bundle, the MediaPipe license and notice, and
+    Face Landmarker \`float16/1\` and Selfie Segmenter task bundles, the MediaPipe
+    license and notice, and
     the three upstream model cards. The completion marker is written only after
     every manifest response has been integrity-checked and read back, so a partial
     cache is not an offline-ready release.`,
@@ -472,8 +471,8 @@ test("tracks the exact CSP, acceptance, and provenance clauses", () => {
   expectDocumentedClause(
     notices,
     `Smart Smile redistributes the self-hosted MediaPipe Tasks Vision runtime
-    \`@mediapipe/tasks-vision@0.10.35\` and the official Face Landmarker model
-    \`float16/1\` as release \`6c23e451b7a9b523\`. The immutable release inventory,
+    \`@mediapipe/tasks-vision@0.10.35\`, the official Face Landmarker model
+    \`float16/1\`, and the official Selfie Segmenter model as release \`c8e4fbace24ccdb3\`. The immutable release inventory,
     SHA-256 values, byte counts, and per-asset provenance are in
     \`apps/web/src/vision/generated/release-manifest.json\`.`,
   );
@@ -491,6 +490,8 @@ test("tracks the exact CSP, acceptance, and provenance clauses", () => {
     - MediaPipe license: <https://raw.githubusercontent.com/google-ai-edge/mediapipe/v0.10.35/LICENSE>
     - Face Landmarker model bundle:
     <https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task>
+    - Selfie Segmenter model bundle:
+    <https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite>
     - BlazeFace Short Range model card:
     <https://storage.googleapis.com/mediapipe-assets/MediaPipe%20BlazeFace%20Model%20Card%20%28Short%20Range%29.pdf>
     - Face Mesh V2 model card:
@@ -516,7 +517,8 @@ test("rejects contradictory Ticket 03 documentation", () => {
       { document: deployment, heading: "Ticket 03 runtime CSP" },
       {
         document: notices,
-        heading: "MediaPipe Tasks Vision and Face Landmarker release",
+        heading:
+          "MediaPipe Tasks Vision, Face Landmarker, and Selfie Segmenter release",
       },
     ]),
   ).toBe(false);

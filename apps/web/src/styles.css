@@ -886,6 +886,246 @@ h1 {
   box-shadow: 0 0 0 3px var(--color-overlay-focus-shadow);
 }
 
+.capture-journey {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  display: grid;
+  box-sizing: border-box;
+  align-content: center;
+  justify-items: center;
+  padding: clamp(20px, 4vw, 48px);
+  color: var(--color-text-strong);
+  pointer-events: auto;
+}
+
+.capture-journey--countdown,
+.capture-journey--message {
+  background: rgb(8 17 15 / 78%);
+  color: var(--color-overlay-text);
+  text-align: center;
+  text-shadow: 0 2px 14px rgb(0 0 0 / 40%);
+}
+
+.capture-journey--countdown > *,
+.capture-journey--message > * {
+  max-width: 34rem;
+}
+
+.capture-journey__eyebrow {
+  margin: 0 0 8px;
+  color: var(--color-action);
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.capture-journey--countdown .capture-journey__eyebrow,
+.capture-journey--message .capture-journey__eyebrow {
+  color: var(--color-overlay-ready);
+}
+
+.capture-journey h2 {
+  margin: 0;
+  font-size: clamp(1.5rem, 3vw, 2.5rem);
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.capture-journey p {
+  margin: 10px 0 0;
+  color: var(--color-text-muted);
+  line-height: 1.45;
+}
+
+.capture-journey--countdown p,
+.capture-journey--message p {
+  color: var(--color-placeholder-muted);
+}
+
+.capture-journey__countdown {
+  display: block;
+  font-family: var(--font-display);
+  font-size: clamp(5rem, 18vw, 10rem);
+  line-height: 0.9;
+}
+
+.capture-journey__capturing {
+  font-size: clamp(1.4rem, 4vw, 2.25rem);
+  font-weight: 750;
+}
+
+.capture-journey--preview {
+  overflow: auto;
+  align-items: center;
+  background: rgb(8 17 15 / 76%);
+}
+
+.capture-journey__content {
+  width: min(100%, 720px);
+  max-height: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  padding: clamp(18px, 3vw, 32px);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 24px;
+  background: var(--color-surface);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 38%);
+}
+
+.capture-journey__heading {
+  margin-bottom: 18px;
+}
+
+.capture-journey__images {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.capture-journey__image {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 16px;
+  background: var(--color-canvas);
+}
+
+.capture-journey__image--selected {
+  border-color: var(--color-action);
+  box-shadow: 0 0 0 2px rgb(15 127 112 / 18%);
+}
+
+.capture-journey__image img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+}
+
+.capture-journey__image figcaption {
+  padding: 8px 10px;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.capture-journey__options,
+.capture-journey__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.capture-journey__option,
+.capture-journey__primary,
+.capture-journey__secondary {
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 750;
+}
+
+.capture-journey__option {
+  flex: 1 1 145px;
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+}
+
+.capture-journey__option[aria-pressed="true"] {
+  border-color: var(--color-action);
+  background: var(--color-surface-hover);
+  color: var(--color-action-hover);
+}
+
+.capture-journey__primary {
+  border: 1px solid var(--color-action);
+  background: var(--color-action);
+  color: var(--color-canvas);
+}
+
+.capture-journey__primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.capture-journey__secondary {
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+}
+
+.capture-journey__actions > * {
+  flex: 1 1 180px;
+}
+
+.capture-journey__form {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.capture-journey__form label {
+  color: var(--color-text-strong);
+  font-size: 0.875rem;
+  font-weight: 750;
+}
+
+.capture-journey__form input[type="email"] {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-medium);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+  font: inherit;
+}
+
+.capture-journey__consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.capture-journey__consent input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--color-action);
+}
+
+.capture-journey__privacy {
+  margin: 0 !important;
+  font-size: 0.78rem;
+}
+
+.capture-journey__error {
+  color: var(--color-danger) !important;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+@media (max-width: 560px) {
+  .capture-journey {
+    padding: 12px;
+  }
+
+  .capture-journey__content {
+    border-radius: 18px;
+  }
+
+  .capture-journey__images {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 767px) {
   .app-shell--camera-active {
     padding: 0;

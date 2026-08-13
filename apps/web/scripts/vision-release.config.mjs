@@ -62,6 +62,15 @@ export const remoteAssets = [
     version: modelVersion,
   },
   {
+    destination: "selfie_segmenter.tflite",
+    licenseRef,
+    requiredForOffline: true,
+    role: "selfie-segmentation-model",
+    source:
+      "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
+    version: "float16/latest",
+  },
+  {
     destination: "LICENSE-MediaPipe.txt",
     licenseRef,
     requiredForOffline: true,

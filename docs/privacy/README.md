@@ -4,6 +4,21 @@ Smart Smile's MVP boundary is on-device processing with no account, camera uploa
 application photo persistence, or analytics collector. Ticket 02 requests a camera only from the
 participant's `Continue to camera` gesture and requests video with `audio: false`.
 
+## Capture and email delivery boundary
+
+After a verified three-second smile and three-second countdown, the browser captures a transient
+three-frame burst. It selects one frame using dimensions, one-face/continuity evidence, lighting,
+and sharpness gates. The original and a selected background treatment are displayed before the
+participant enters an email address and gives explicit consent.
+
+The local default is demo delivery and does not make a network request. Production delivery sends
+only the selected image, email address, consent flag, and one idempotency key to the configured
+same-origin PHP endpoint. The PHP endpoint keeps the Resend credential server-side, validates the
+request, applies a bounded IP rate limit, writes the image only to a temporary file for the provider
+request, and deletes that file before responding. Smart Smile does not save the image, email, or
+participant record after delivery. The provider's own retention and delivery records are outside
+the browser application boundary and must be covered by the deployment operator's privacy notice.
+
 Camera diagnostics are bounded, read-only, and in memory only. They contain stable state/reason,
 permission status, facing mode, delivered dimensions, generation, and lifecycle events. They never
 contain images, streams, object URLs, device labels, device IDs, landmarks, geometry, face data,
@@ -27,10 +42,10 @@ CDN, or participant-data request is used.
 The persisted static allowlist is exact: the Workbox shell cache may contain the
 hashed application shell, PWA icons, static recovery help, and the generated
 release-manifest metadata; the separate versioned vision cache may contain only
-the immutable manifest paths for release `6c23e451b7a9b523` plus its matching
+the immutable manifest paths for release `c8e4fbace24ccdb3` plus its matching
 completion-marker record. That release is MediaPipe runtime/WASM files, the
-Face Landmarker `float16/1` task bundle, the MediaPipe license and notice, and
-the three upstream model cards. The completion marker is written only after
+Face Landmarker `float16/1` and Selfie Segmenter task bundles, the MediaPipe
+license and notice, and the three upstream model cards. The completion marker is written only after
 every manifest response has been integrity-checked and read back, so a partial
 cache is not an offline-ready release.
 

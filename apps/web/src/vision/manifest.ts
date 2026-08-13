@@ -6,6 +6,7 @@ export type VisionAssetRole =
   | "wasm-loader-baseline"
   | "wasm-binary-baseline"
   | "face-landmarker-model"
+  | "selfie-segmentation-model"
   | "license"
   | "notice"
   | "model-card-face-detector"
@@ -43,6 +44,7 @@ const VISION_ASSET_ROLES: readonly VisionAssetRole[] = [
   "wasm-loader-baseline",
   "wasm-binary-baseline",
   "face-landmarker-model",
+  "selfie-segmentation-model",
   "license",
   "notice",
   "model-card-face-detector",

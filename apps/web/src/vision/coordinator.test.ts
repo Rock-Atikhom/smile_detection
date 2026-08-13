@@ -1538,7 +1538,7 @@ describe("VisionCoordinator", () => {
       expect(snapshot().verification.reason).toBe("none");
       expect(snapshot().verification.progressMs).toBeGreaterThan(0);
       expect(snapshot().verification.progressRatio).toBe(
-        snapshot().verification.progressMs / 5_000,
+        snapshot().verification.progressMs / 3_000,
       );
     });
 

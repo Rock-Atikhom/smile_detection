@@ -16,7 +16,7 @@ export const DEFAULT_SMILE_PROFILE: Readonly<SmileProfile> = Object.freeze({
   highThreshold: 0.6,
   lowThreshold: 0.45,
   graceMs: 300,
-  verificationMs: 5_000,
+  verificationMs: 3_000,
 });
 
 interface CategoryScore {

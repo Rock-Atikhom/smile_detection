@@ -65,17 +65,43 @@ npm run web:build
 npm run web:e2e
 ```
 
+## Capture journey and email delivery
+
+When the browser verifies a smile, Smart Smile now runs this participant journey:
+
+1. Hold a verified smile for 3 seconds.
+2. Show a visible 3-second countdown.
+3. Capture a three-frame burst and keep the clearest frame that passes the quality gate.
+4. Show the original room photo beside the selected preview.
+5. Let the participant choose Original room, Warm studio, or Sky blue.
+6. Ask for an email address and explicit consent before delivery.
+
+Local development uses a safe demo delivery mode by default; it never sends the photo and
+the completion message says so. To enable real delivery, build the web app with:
+
+```bash
+VITE_SMART_SMILE_EMAIL_MODE=server \
+VITE_SMART_SMILE_EMAIL_ENDPOINT=/api/send-photo.php \
+npm run web:build
+```
+
+Serve the resulting `apps/web/dist` from a PHP-capable host so `api/send-photo.php` executes.
+Configure `RESEND_API_KEY`, `SMART_SMILE_FROM`, and (recommended)
+`SMART_SMILE_ALLOWED_ORIGIN` in the PHP server environment. The Resend key must never be a
+`VITE_` variable or committed to the repository. The endpoint validates the email, consent,
+image type and size, rate-limits requests, forwards an idempotency key, and deletes its
+temporary photo file after the provider request.
+
 ## Offline vision runtime
 
-Ticket 03 prepares a self-hosted, on-device vision runtime; it stops at runtime
-initialization and verified offline reopening. It does not submit camera frames,
-extract landmarks or blendshapes for the application, or detect smiles. No
-dataset is collected and no custom model is trained.
+The self-hosted, on-device vision runtime powers face landmarks, blendshapes, smile
+verification, and post-capture person segmentation. No dataset is collected and no custom
+model is trained.
 
 The pinned release is `@mediapipe/tasks-vision@0.10.35` with the official Face
 Landmarker `float16/1` model. Its generated, checked-in manifest is
 `apps/web/src/vision/generated/release-manifest.json` (release ID
-`6c23e451b7a9b523`); immutable runtime files are under
+`c8e4fbace24ccdb3`); immutable runtime files are under
 `apps/web/public/vision/mediapipe-0.10.35-face-landmarker-float16-v1/`.
 
 To intentionally refresh vendored assets and then verify that the committed
