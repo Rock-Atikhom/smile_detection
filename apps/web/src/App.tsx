@@ -19,6 +19,7 @@ import {
 import { DEFAULT_SMILE_PROFILE } from "./vision/smile-score";
 import type { VerificationPhase } from "./vision/smile-verification";
 import { useVisionRuntime } from "./vision/useVisionRuntime";
+import PhotoPreviewPrototype from "./PhotoPreviewPrototype";
 
 type Copy = { action?: string; heading: string; text: string };
 
@@ -497,7 +498,7 @@ function combinedCopy(
   return coachCopy(cameraSnapshot);
 }
 
-export default function App() {
+function LiveCaptureApp() {
   const { restart, snapshot, start, stop, switchCamera, videoRef } =
     useCameraSession();
   const vision = useVisionRuntime();
@@ -1041,5 +1042,16 @@ export default function App() {
         </footer>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  const prototype = new URLSearchParams(window.location.search).get(
+    "prototype",
+  );
+  return prototype === "preview" ? (
+    <PhotoPreviewPrototype />
+  ) : (
+    <LiveCaptureApp />
   );
 }
