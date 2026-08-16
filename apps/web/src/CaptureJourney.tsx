@@ -7,6 +7,7 @@ import {
 } from "./capture-flow";
 import { createBackgroundRenderer } from "./background-renderer";
 import { sendPhoto } from "./delivery";
+import { createPhotoFilename, downloadPhoto } from "./download-photo";
 import {
   capturePhotoBurst,
   captureVideoFrame,
@@ -53,6 +54,9 @@ export function CaptureJourney({
   const [deliveryMode, setDeliveryMode] = useState<"mock" | "server" | null>(
     null,
   );
+  const [downloadStatus, setDownloadStatus] = useState<
+    "idle" | "started" | "error"
+  >("idle");
   const [treatmentLoading, setTreatmentLoading] =
     useState<BackgroundTreatment | null>(null);
 
@@ -60,6 +64,7 @@ export function CaptureJourney({
     setFlow(createInitialCaptureFlow());
     setEmailStep(false);
     setDeliveryMode(null);
+    setDownloadStatus("idle");
     setTreatmentLoading(null);
     onResetDetection();
   };
@@ -209,6 +214,7 @@ export function CaptureJourney({
 
   const selectBackground = async (background: BackgroundTreatment) => {
     if (treatmentLoading !== null) return;
+    setDownloadStatus("idle");
     setFlow((current) =>
       advanceCaptureFlow(current, { type: "select-background", background }),
     );
@@ -249,6 +255,15 @@ export function CaptureJourney({
     } finally {
       renderer?.close();
       setTreatmentLoading(null);
+    }
+  };
+
+  const downloadSelectedPhoto = () => {
+    try {
+      downloadPhoto(selectedImage, createPhotoFilename());
+      setDownloadStatus("started");
+    } catch {
+      setDownloadStatus("error");
     }
   };
 
@@ -333,6 +348,16 @@ export function CaptureJourney({
           </div>
         )}
         {flow.error && <p className="capture-journey__error">{flow.error}</p>}
+        {downloadStatus === "started" && (
+          <p className="capture-journey__privacy" role="status">
+            Download started
+          </p>
+        )}
+        {downloadStatus === "error" && (
+          <p className="capture-journey__error" role="alert">
+            We could not prepare that photo. Please try again.
+          </p>
+        )}
         {emailStep ? (
           <form className="capture-journey__form" onSubmit={submit}>
             <label htmlFor="smart-smile-email">Email address</label>
@@ -394,6 +419,13 @@ export function CaptureJourney({
               type="button"
             >
               Retake
+            </button>
+            <button
+              className="capture-journey__secondary"
+              onClick={downloadSelectedPhoto}
+              type="button"
+            >
+              Download photo
             </button>
             <button
               className="capture-journey__primary"
