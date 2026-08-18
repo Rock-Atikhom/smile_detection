@@ -17,6 +17,20 @@ function environment_value(string $name): string
     return $value === false ? '' : trim($value);
 }
 
+function participant_name(array $payload, string $key, bool $required): ?string
+{
+    if (!array_key_exists($key, $payload) || !is_string($payload[$key])) {
+        return $required ? null : '';
+    }
+
+    $value = trim($payload[$key]);
+    if (($required && $value === '') || strlen($value) > 80 || preg_match('/[\x00-\x1F\x7F]/', $value)) {
+        return null;
+    }
+
+    return $value;
+}
+
 if ($_SERVER['REQUEST_METHOD'] ?? '' !== 'POST') {
     header('Allow: POST');
     respond(405, ['error' => 'Only POST is supported.']);
@@ -36,13 +50,16 @@ if (!is_array($payload)) {
 
 $email = filter_var($payload['email'] ?? '', FILTER_VALIDATE_EMAIL);
 $consent = ($payload['consent'] ?? false) === true;
+$firstName = participant_name($payload, 'firstName', true);
+$lastName = participant_name($payload, 'lastName', true);
+$nickname = participant_name($payload, 'nickname', false);
 $image = is_string($payload['image'] ?? null) ? $payload['image'] : '';
 $idempotencyKey = is_string($payload['idempotencyKey'] ?? null)
     ? $payload['idempotencyKey']
     : trim((string) ($_SERVER['HTTP_IDEMPOTENCY_KEY'] ?? ''));
 
-if ($email === false || !$consent || $image === '') {
-    respond(422, ['error' => 'A valid email, photo, and consent are required.']);
+if ($email === false || !$consent || $firstName === null || $lastName === null || $nickname === null || $image === '') {
+    respond(422, ['error' => 'Name, email, photo, and consent are required.']);
 }
 if (strlen($idempotencyKey) < 8 || strlen($idempotencyKey) > 128 || !preg_match('/^[A-Za-z0-9._:-]+$/', $idempotencyKey)) {
     respond(422, ['error' => 'The delivery request is invalid.']);
@@ -97,8 +114,14 @@ if ($temporaryPhoto === false || file_put_contents($temporaryPhoto, $imageBytes)
 $resendPayload = json_encode([
     'from' => $from,
     'to' => [$email],
-    'subject' => 'Your Smart Smile photo',
-    'html' => '<p>Thanks for taking a Smart Smile photo.</p>',
+    'subject' => 'Your Smart Smile photo — ' . $firstName . ' ' . $lastName,
+    'html' => '<p>Hello ' . htmlspecialchars($firstName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . ',</p>'
+        . '<p>Your Smart Smile photo is attached.</p>'
+        . '<p><strong>Name:</strong> ' . htmlspecialchars($firstName . ' ' . $lastName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+        . ($nickname !== ''
+            ? '<br><strong>Nickname:</strong> ' . htmlspecialchars($nickname, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+            : '')
+        . '</p>',
     'attachments' => [[
         'content' => base64_encode($imageBytes),
         'filename' => 'smart-smile.' . ($imageParts[1] === 'image/png' ? 'png' : 'jpg'),
@@ -135,4 +158,3 @@ respond(200, [
         : null,
     'ok' => true,
 ]);
-

@@ -28,6 +28,9 @@ export interface CaptureFlowState {
   candidates: CaptureCandidate[];
   candidate: CaptureCandidate | null;
   background: BackgroundTreatment;
+  firstName: string;
+  lastName: string;
+  nickname: string;
   email: string;
   consent: boolean;
   error: string | null;
@@ -38,6 +41,9 @@ export type CaptureFlowEvent =
   | { type: "countdown-tick" }
   | { type: "capture-complete"; candidates: CaptureCandidate[] }
   | { type: "select-background"; background: BackgroundTreatment }
+  | { type: "set-first-name"; firstName: string }
+  | { type: "set-last-name"; lastName: string }
+  | { type: "set-nickname"; nickname: string }
   | { type: "set-email"; email: string }
   | { type: "set-consent"; consent: boolean }
   | { type: "send-started" }
@@ -57,6 +63,9 @@ export function createInitialCaptureFlow(): CaptureFlowState {
     candidates: [],
     candidate: null,
     background: "original",
+    firstName: "",
+    lastName: "",
+    nickname: "",
     email: "",
     consent: false,
     error: null,
@@ -92,10 +101,40 @@ export function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
+function isValidNamePart(value: string, required: boolean) {
+  const normalized = value.trim();
+  const hasControlCharacter = Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  });
+  return (
+    (required ? normalized.length > 0 : true) &&
+    normalized.length <= 80 &&
+    !hasControlCharacter
+  );
+}
+
+export function isValidParticipantDetails(
+  firstName: string,
+  lastName: string,
+  nickname: string,
+) {
+  return (
+    isValidNamePart(firstName, true) &&
+    isValidNamePart(lastName, true) &&
+    isValidNamePart(nickname, false)
+  );
+}
+
 export function canSendPhoto(state: CaptureFlowState) {
   return (
     state.phase === "preview" &&
     state.candidate !== null &&
+    isValidParticipantDetails(
+      state.firstName,
+      state.lastName,
+      state.nickname,
+    ) &&
     isValidEmail(state.email) &&
     state.consent
   );
@@ -145,6 +184,12 @@ export function advanceCaptureFlow(
     }
     case "select-background":
       return { ...state, background: event.background, error: null };
+    case "set-first-name":
+      return { ...state, firstName: event.firstName, error: null };
+    case "set-last-name":
+      return { ...state, lastName: event.lastName, error: null };
+    case "set-nickname":
+      return { ...state, nickname: event.nickname, error: null };
     case "set-email":
       return { ...state, email: event.email, error: null };
     case "set-consent":
@@ -158,6 +203,9 @@ export function advanceCaptureFlow(
         candidates: [],
         email: "",
         consent: false,
+        firstName: "",
+        lastName: "",
+        nickname: "",
         candidate: null,
       };
     case "send-failed":

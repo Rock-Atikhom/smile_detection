@@ -9,10 +9,11 @@ participant's `Continue to camera` gesture and requests video with `audio: false
 After a verified three-second smile and three-second countdown, the browser captures a transient
 three-frame burst. It selects one frame using dimensions, one-face/continuity evidence, lighting,
 and sharpness gates. The original and a selected background treatment are displayed before the
-participant enters an email address and gives explicit consent.
+participant enters first name, last name, an optional nickname, an email address, and gives explicit
+consent.
 
 The local default is demo delivery and does not make a network request. Production delivery sends
-only the selected image, email address, consent flag, and one idempotency key to the configured
+only the selected image, participant details, email address, consent flag, and one idempotency key to the configured
 same-origin PHP endpoint. The PHP endpoint keeps the Resend credential server-side, validates the
 request, applies a bounded IP rate limit, writes the image only to a temporary file for the provider
 request, and deletes that file before responding. Smart Smile does not save the image, email, or

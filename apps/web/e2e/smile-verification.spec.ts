@@ -583,6 +583,9 @@ test("exactly three thousand milliseconds reaches Smile verified", async ({
   await expect(page.getByRole("button", { name: "Sky blue" })).toBeVisible();
   await page.getByRole("button", { name: "Warm studio" }).click();
   await page.getByRole("button", { name: "Use this photo" }).click();
+  await page.getByLabel("First name").fill("Ada");
+  await page.getByLabel("Last name").fill("Lovelace");
+  await page.getByLabel("Nickname (optional)").fill("Ada");
   await page.getByLabel("Email address").fill("participant@example.com");
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Send photo" }).click();

@@ -13,7 +13,8 @@ photo store.
 
 The Apps Script URL is public and is not a secret. Anyone who obtains it can consume the owner's
 Apps Script execution and email quota. Keep the endpoint limited to this classroom demo, monitor
-the account quota, and revoke the deployment when the demo ends.
+the account quota, and revoke the deployment when the demo ends. The email includes the required
+first name and last name plus the optional nickname supplied by the participant.
 
 ## Deploy the script
 
@@ -46,7 +47,7 @@ private key to GitHub. The workflow remains in mock mode when these variables ar
 
 Use a non-sensitive photo and a test mailbox. Confirm that:
 
-1. A participant must enter a syntactically valid email and check consent.
+1. A participant must enter first name, last name, a syntactically valid email, and check consent.
 2. The request reaches the manager-owned mailbox with the JPEG attached.
 3. Retrying the same idempotency key does not create a duplicate message within 10 minutes.
 4. A missing consent, invalid email, non-JPEG, or oversized payload is rejected.

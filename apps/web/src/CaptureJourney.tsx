@@ -3,6 +3,7 @@ import {
   advanceCaptureFlow,
   createInitialCaptureFlow,
   isValidEmail,
+  isValidParticipantDetails,
   type BackgroundTreatment,
 } from "./capture-flow";
 import { createBackgroundRenderer } from "./background-renderer";
@@ -279,8 +280,11 @@ export function CaptureJourney({
       const result = await sendPhoto({
         consent: true,
         email: flow.email.trim(),
+        firstName: flow.firstName.trim(),
         idempotencyKey: nextIdempotencyKey(),
         image: selectedImage,
+        lastName: flow.lastName.trim(),
+        nickname: flow.nickname.trim(),
       });
       setDeliveryMode(result.mode);
       setFlow((current) =>
@@ -305,12 +309,10 @@ export function CaptureJourney({
       <div className="capture-journey__content">
         <div className="capture-journey__heading">
           <p className="capture-journey__eyebrow">Photo captured</p>
-          <h2>
-            {emailStep ? "Where should we send it?" : "Choose your photo"}
-          </h2>
+          <h2>{emailStep ? "Add your details" : "Choose your photo"}</h2>
           <p>
             {emailStep
-              ? "Enter an email address to receive the selected photo."
+              ? "Tell us who this photo belongs to and where to send it."
               : "Your original stays available while you compare the three looks."}
           </p>
         </div>
@@ -362,6 +364,56 @@ export function CaptureJourney({
         )}
         {emailStep ? (
           <form className="capture-journey__form" onSubmit={submit}>
+            <label htmlFor="smart-smile-first-name">First name</label>
+            <input
+              autoComplete="given-name"
+              id="smart-smile-first-name"
+              onChange={(event) =>
+                setFlow((current) =>
+                  advanceCaptureFlow(current, {
+                    type: "set-first-name",
+                    firstName: event.target.value,
+                  }),
+                )
+              }
+              placeholder="First name"
+              required
+              type="text"
+              value={flow.firstName}
+            />
+            <label htmlFor="smart-smile-last-name">Last name</label>
+            <input
+              autoComplete="family-name"
+              id="smart-smile-last-name"
+              onChange={(event) =>
+                setFlow((current) =>
+                  advanceCaptureFlow(current, {
+                    type: "set-last-name",
+                    lastName: event.target.value,
+                  }),
+                )
+              }
+              placeholder="Last name"
+              required
+              type="text"
+              value={flow.lastName}
+            />
+            <label htmlFor="smart-smile-nickname">Nickname (optional)</label>
+            <input
+              autoComplete="nickname"
+              id="smart-smile-nickname"
+              onChange={(event) =>
+                setFlow((current) =>
+                  advanceCaptureFlow(current, {
+                    type: "set-nickname",
+                    nickname: event.target.value,
+                  }),
+                )
+              }
+              placeholder="What should we call you?"
+              type="text"
+              value={flow.nickname}
+            />
             <label htmlFor="smart-smile-email">Email address</label>
             <input
               autoComplete="email"
@@ -400,7 +452,16 @@ export function CaptureJourney({
             </p>
             <button
               className="capture-journey__primary"
-              disabled={!emailValid || !flow.consent || sending}
+              disabled={
+                !isValidParticipantDetails(
+                  flow.firstName,
+                  flow.lastName,
+                  flow.nickname,
+                ) ||
+                !emailValid ||
+                !flow.consent ||
+                sending
+              }
               type="submit"
             >
               {sending ? "Sending…" : "Send photo"}

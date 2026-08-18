@@ -74,7 +74,7 @@ When the browser verifies a smile, Smart Smile now runs this participant journey
 3. Capture a three-frame burst and keep the clearest frame that passes the quality gate.
 4. Show the original room photo beside the selected preview.
 5. Let the participant choose Original room, Warm studio, or Sky blue.
-6. Ask for an email address and explicit consent before delivery.
+6. Ask for first name, last name, optional nickname, email address, and explicit consent before delivery.
 
 Local development uses a safe demo delivery mode by default; it never sends the photo and
 the completion message says so. To enable real delivery, build the web app with:

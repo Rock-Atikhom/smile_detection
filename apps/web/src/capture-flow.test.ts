@@ -94,9 +94,37 @@ describe("capture flow", () => {
     state = advanceCaptureFlow(state, { type: "set-consent", consent: true });
 
     expect(isValidEmail("person@example.com")).toBe(true);
-    expect(canSendPhoto(state)).toBe(true);
+    expect(
+      canSendPhoto({
+        ...state,
+        firstName: "Ada",
+        lastName: "Lovelace",
+        nickname: "Ada",
+      } as typeof state),
+    ).toBe(true);
     expect(canSendPhoto({ ...state, consent: false })).toBe(false);
     expect(canSendPhoto({ ...state, email: "not-an-email" })).toBe(false);
+  });
+
+  it("requires first and last name while keeping nickname optional", () => {
+    const state = {
+      ...createInitialCaptureFlow(),
+      candidate: candidate("one"),
+      consent: true,
+      email: "person@example.com",
+      phase: "preview" as const,
+    };
+
+    expect(
+      canSendPhoto({ ...state, firstName: "", lastName: "" } as typeof state),
+    ).toBe(false);
+    expect(
+      canSendPhoto({
+        ...state,
+        firstName: "Ada",
+        lastName: "Lovelace",
+      } as typeof state),
+    ).toBe(true);
   });
 
   it("releases retained photos after delivery succeeds", () => {
@@ -108,6 +136,9 @@ describe("capture flow", () => {
         candidate: candidate("one"),
         email: "person@example.com",
         consent: true,
+        firstName: "Ada",
+        lastName: "Lovelace",
+        nickname: "Ada",
       },
       { type: "send-succeeded" },
     );
@@ -117,5 +148,8 @@ describe("capture flow", () => {
     expect(state.candidate).toBeNull();
     expect(state.email).toBe("");
     expect(state.consent).toBe(false);
+    expect(state.firstName).toBe("");
+    expect(state.lastName).toBe("");
+    expect(state.nickname).toBe("");
   });
 });

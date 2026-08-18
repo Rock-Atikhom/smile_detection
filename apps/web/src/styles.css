@@ -1223,6 +1223,7 @@ h2 {
   font-weight: 750;
 }
 
+.capture-journey__form input[type="text"],
 .capture-journey__form input[type="email"] {
   width: 100%;
   box-sizing: border-box;

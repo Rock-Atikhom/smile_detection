@@ -1,10 +1,15 @@
+import { isValidParticipantDetails } from "./capture-flow";
+
 export type PhotoDeliveryMode = "mock" | "server" | "apps-script";
 
 export interface PhotoDeliveryRequest {
   consent: true;
   email: string;
+  firstName: string;
   idempotencyKey: string;
   image: string;
+  lastName: string;
+  nickname: string;
 }
 
 export interface PhotoDeliveryDependencies {
@@ -36,8 +41,17 @@ export async function sendPhoto(
   request: PhotoDeliveryRequest,
   dependencies: PhotoDeliveryDependencies = {},
 ): Promise<PhotoDeliveryResult> {
-  if (!request.consent || request.email.trim() === "" || request.image === "") {
-    throw new Error("Email, photo, and consent are required");
+  if (
+    !request.consent ||
+    !isValidParticipantDetails(
+      request.firstName,
+      request.lastName,
+      request.nickname,
+    ) ||
+    request.email.trim() === "" ||
+    request.image === ""
+  ) {
+    throw new Error("Name, email, photo, and consent are required");
   }
 
   const mode = dependencies.mode ?? configuredMode();

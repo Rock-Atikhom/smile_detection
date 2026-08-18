@@ -1,4 +1,5 @@
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_NAME_LENGTH = 80;
 const IDEMPOTENCY_TTL_SECONDS = 10 * 60;
 const JPEG_PREFIX = "data:image/jpeg;base64,";
 
@@ -22,12 +23,29 @@ function doPost(event) {
       }
 
       const attachment = createJpegAttachment(request.image);
+      const displayName = [request.firstName, request.lastName].join(" ");
       MailApp.sendEmail({
         attachments: [attachment],
-        body: "Your Smart Smile photo is attached.",
-        htmlBody: "Your Smart Smile photo is attached.",
+        body: [
+          `Hello ${request.firstName},`,
+          "",
+          "Your Smart Smile photo is attached.",
+          "",
+          `Name: ${displayName}`,
+          request.nickname ? `Nickname: ${request.nickname}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        htmlBody: [
+          `<p>Hello ${escapeHtml(request.firstName)},</p>`,
+          "<p>Your Smart Smile photo is attached.</p>",
+          `<p><strong>Name:</strong> ${escapeHtml(displayName)}<br>`,
+          request.nickname
+            ? `<strong>Nickname:</strong> ${escapeHtml(request.nickname)}</p>`
+            : "</p>",
+        ].join(""),
         name: "Smart Smile",
-        subject: "Your Smart Smile photo",
+        subject: `Your Smart Smile photo — ${displayName}`,
         to: request.email,
       });
       cache.put(request.idempotencyKey, "sent", IDEMPOTENCY_TTL_SECONDS);
@@ -59,6 +77,9 @@ function parseRequest(event) {
   ) {
     throw new Error("invalid-email");
   }
+  request.firstName = parseName(request.firstName, true, "first-name");
+  request.lastName = parseName(request.lastName, true, "last-name");
+  request.nickname = parseName(request.nickname, false, "nickname");
   if (
     typeof request.idempotencyKey !== "string" ||
     !/^[A-Za-z0-9._:-]{8,160}$/.test(request.idempotencyKey)
@@ -77,6 +98,19 @@ function parseRequest(event) {
   return request;
 }
 
+function parseName(value, required, errorCode) {
+  if (typeof value !== "string") throw new Error(`invalid-${errorCode}`);
+  const name = value.trim();
+  if (
+    (required && name.length === 0) ||
+    name.length > MAX_NAME_LENGTH ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new Error(`invalid-${errorCode}`);
+  }
+  return name;
+}
+
 function createJpegAttachment(image) {
   const encoded = image.slice(JPEG_PREFIX.length);
   const bytes = Utilities.base64Decode(encoded);
@@ -87,6 +121,20 @@ function createJpegAttachment(image) {
     throw new Error("image-is-not-jpeg");
   }
   return Utilities.newBlob(bytes, "image/jpeg", "smart-smile.jpg");
+}
+
+function escapeHtml(value) {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character],
+  );
 }
 
 function jsonResponse(payload) {

@@ -67,4 +67,38 @@ describe("CaptureJourney preview", () => {
       screen.getByRole("button", { name: "Download photo" }),
     ).toBeVisible();
   });
+
+  it("collects participant details before email consent", async () => {
+    render(
+      <CaptureJourney
+        hasContinuity
+        isSingleFace
+        isSmileVerified
+        onResetDetection={vi.fn()}
+        videoRef={{ current: null }}
+      />,
+    );
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+    }
+
+    await act(async () => {
+      const useButtons = screen.getAllByRole("button", {
+        name: "Use this photo",
+      });
+      useButtons[useButtons.length - 1]?.click();
+    });
+
+    expect(screen.getByRole("textbox", { name: "First name" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Last name" })).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "Nickname (optional)" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "Email address" }),
+    ).toBeVisible();
+  });
 });

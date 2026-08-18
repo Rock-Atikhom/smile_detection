@@ -4,8 +4,11 @@ import { sendPhoto } from "./delivery";
 const request = {
   consent: true as const,
   email: "person@example.com",
+  firstName: "Ada",
   idempotencyKey: "capture-123",
   image: "data:image/jpeg;base64,photo",
+  lastName: "Lovelace",
+  nickname: "Ada",
 };
 
 describe("photo delivery", () => {
@@ -81,5 +84,20 @@ describe("photo delivery", () => {
         mode: "server",
       }),
     ).rejects.toThrow("Email provider unavailable");
+  });
+
+  it("requires first and last name before sending", async () => {
+    const fetch = vi.fn();
+
+    await expect(
+      sendPhoto(
+        { ...request, firstName: "", lastName: "" },
+        {
+          fetch,
+          mode: "apps-script",
+        },
+      ),
+    ).rejects.toThrow("Name, email, photo, and consent are required");
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
