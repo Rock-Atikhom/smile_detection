@@ -60,6 +60,8 @@ jobs:
         run: npm run web:build
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
+          VITE_SMART_SMILE_EMAIL_MODE: ${{ vars.SMART_SMILE_EMAIL_MODE || 'mock' }}
+          VITE_SMART_SMILE_EMAIL_ENDPOINT: ${{ vars.SMART_SMILE_EMAIL_ENDPOINT }}
 
       - name: Archive GitHub Pages artifact
         run: >-

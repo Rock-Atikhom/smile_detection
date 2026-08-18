@@ -1,4 +1,4 @@
-export type PhotoDeliveryMode = "mock" | "server";
+export type PhotoDeliveryMode = "mock" | "server" | "apps-script";
 
 export interface PhotoDeliveryRequest {
   consent: true;
@@ -18,6 +18,9 @@ export interface PhotoDeliveryResult {
 }
 
 function configuredMode(): PhotoDeliveryMode {
+  if (import.meta.env.VITE_SMART_SMILE_EMAIL_MODE === "apps-script") {
+    return "apps-script";
+  }
   return import.meta.env.VITE_SMART_SMILE_EMAIL_MODE === "server"
     ? "server"
     : "mock";
@@ -39,6 +42,21 @@ export async function sendPhoto(
 
   const mode = dependencies.mode ?? configuredMode();
   if (mode === "mock") return { mode };
+
+  if (mode === "apps-script") {
+    await (dependencies.fetch ?? globalThis.fetch)(
+      dependencies.endpoint ?? configuredEndpoint(),
+      {
+        body: JSON.stringify(request),
+        headers: {
+          "Content-Type": "text/plain;charset=UTF-8",
+        },
+        method: "POST",
+        mode: "no-cors",
+      },
+    );
+    return { mode };
+  }
 
   const response = await (dependencies.fetch ?? globalThis.fetch)(
     dependencies.endpoint ?? configuredEndpoint(),

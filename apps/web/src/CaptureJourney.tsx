@@ -51,9 +51,9 @@ export function CaptureJourney({
 }: CaptureJourneyProps) {
   const [flow, setFlow] = useState(createInitialCaptureFlow);
   const [emailStep, setEmailStep] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<"mock" | "server" | null>(
-    null,
-  );
+  const [deliveryMode, setDeliveryMode] = useState<
+    "mock" | "server" | "apps-script" | null
+  >(null);
   const [downloadStatus, setDownloadStatus] = useState<
     "idle" | "started" | "error"
   >("idle");
@@ -193,7 +193,9 @@ export function CaptureJourney({
         <p>
           {deliveryMode === "mock"
             ? "Demo mode is active, so no email was sent."
-            : "Check your inbox for the Smart Smile photo."}
+            : deliveryMode === "apps-script"
+              ? "Your photo request was submitted. Check your inbox shortly."
+              : "Check your inbox for the Smart Smile photo."}
         </p>
         <button
           className="capture-journey__primary"

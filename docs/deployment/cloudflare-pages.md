@@ -54,7 +54,8 @@ deployment; do not guess a `pages.dev` hostname.
 ## Static security headers
 
 `apps/web/public/_headers` is copied byte-for-byte into `apps/web/dist/_headers`. Cloudflare Pages
-applies it to every path. It keeps scripts, styles, and connections self-only, upgrades insecure
+applies it to every path. It keeps scripts and styles self-only, allows connections only to this
+origin plus the two Google Apps Script hosts required by the optional email demo, upgrades insecure
 subresource requests through CSP, blocks objects and framing, allows the camera only for this
 origin, disables the microphone, omits referrers, prevents MIME sniffing, and enables HSTS.
 

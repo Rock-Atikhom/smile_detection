@@ -44,6 +44,29 @@ describe("photo delivery", () => {
     );
   });
 
+  it("submits an Apps Script request without triggering a CORS preflight", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 200 }));
+
+    const result = await sendPhoto(request, {
+      endpoint: "https://script.google.com/macros/s/demo/exec",
+      fetch,
+      mode: "apps-script",
+    });
+
+    expect(result).toEqual({ mode: "apps-script" });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://script.google.com/macros/s/demo/exec",
+      expect.objectContaining({
+        body: JSON.stringify(request),
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        method: "POST",
+        mode: "no-cors",
+      }),
+    );
+  });
+
   it("reports an endpoint failure to the preview flow", async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ error: "Email provider unavailable" }), {

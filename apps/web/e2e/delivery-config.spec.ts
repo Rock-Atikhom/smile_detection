@@ -271,7 +271,14 @@ test("keeps the required restrictive Cloudflare Pages security headers", () => {
     ["default-src", ["'self'"]],
     ["script-src", ["'self'", "'wasm-unsafe-eval'"]],
     ["style-src", ["'self'"]],
-    ["connect-src", ["'self'"]],
+    [
+      "connect-src",
+      [
+        "'self'",
+        "https://script.google.com",
+        "https://script.googleusercontent.com",
+      ],
+    ],
     ["worker-src", ["'self'"]],
     ["object-src", ["'none'"]],
     ["base-uri", ["'self'"]],

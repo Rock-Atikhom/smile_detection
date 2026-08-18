@@ -92,6 +92,13 @@ Configure `RESEND_API_KEY`, `SMART_SMILE_FROM`, and (recommended)
 image type and size, rate-limits requests, forwards an idempotency key, and deletes its
 temporary photo file after the provider request.
 
+For the zero-cost classroom demo, Google Apps Script is supported as an optional delivery mode.
+Use the manager/team-owned deployment and follow [the Google Apps Script deployment guide](docs/deployment/google-apps-script.md).
+The Apps Script request is intentionally fire-and-forget because a public Apps Script Web App
+does not provide a browser-readable CORS response. The UI reports that the request was submitted,
+not that the recipient's inbox accepted it. The default GitHub Pages build remains mock mode until
+the repository variables `SMART_SMILE_EMAIL_MODE` and `SMART_SMILE_EMAIL_ENDPOINT` are configured.
+
 ## Offline vision runtime
 
 The self-hosted, on-device vision runtime powers face landmarks, blendshapes, smile
