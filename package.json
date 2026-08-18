@@ -19,6 +19,7 @@
     "web:typecheck": "npm run typecheck --workspace=@smart-smile/web",
     "web:e2e": "npm run test:e2e --workspace=@smart-smile/web",
     "web:build": "npm run build --workspace=@smart-smile/web",
+    "apps-script:test": "node --test integrations/google-apps-script/Code.test.mjs",
     "web:preview": "npm run preview --workspace=@smart-smile/web",
     "web:vision:check": "npm run vision:manifest:check --workspace=@smart-smile/web"
   }

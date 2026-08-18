@@ -43,6 +43,15 @@ function nextIdempotencyKey(): string {
   return `capture-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function maskEmail(email: string): string {
+  const separator = email.indexOf("@");
+  if (separator <= 0) return "the email address you entered";
+  const localPart = email.slice(0, separator);
+  const domain = email.slice(separator + 1);
+  const visiblePart = localPart.slice(0, Math.min(2, localPart.length));
+  return `${visiblePart}${"•".repeat(Math.max(2, localPart.length - visiblePart.length))}@${domain}`;
+}
+
 export function CaptureJourney({
   hasContinuity,
   isSingleFace,
@@ -55,6 +64,7 @@ export function CaptureJourney({
   const [deliveryMode, setDeliveryMode] = useState<
     "mock" | "server" | "apps-script" | null
   >(null);
+  const [submittedRecipient, setSubmittedRecipient] = useState("");
   const [downloadStatus, setDownloadStatus] = useState<
     "idle" | "started" | "error"
   >("idle");
@@ -65,6 +75,7 @@ export function CaptureJourney({
     setFlow(createInitialCaptureFlow());
     setEmailStep(false);
     setDeliveryMode(null);
+    setSubmittedRecipient("");
     setDownloadStatus("idle");
     setTreatmentLoading(null);
     onResetDetection();
@@ -185,26 +196,46 @@ export function CaptureJourney({
   if (flow.phase === "sent") {
     return (
       <section
-        aria-label="Photo sent"
+        aria-label="Photo request status"
         className="capture-journey capture-journey--message"
         role="status"
       >
-        <p className="capture-journey__eyebrow">All set</p>
-        <h2>Photo request submitted</h2>
-        <p>
-          {deliveryMode === "mock"
-            ? "Demo mode is active, so no email was sent."
-            : deliveryMode === "apps-script"
-              ? "Your request was submitted. Check your inbox and spam folder shortly."
-              : "Check your inbox and spam folder for the Smart Smile photo."}
-        </p>
-        <button
-          className="capture-journey__primary"
-          onClick={resetJourney}
-          type="button"
-        >
-          New participant
-        </button>
+        <div className="capture-journey__message-card">
+          <span aria-hidden="true" className="capture-journey__success-mark">
+            ✓
+          </span>
+          <p className="capture-journey__eyebrow">Request received</p>
+          <h2>Check your email</h2>
+          <p>
+            {deliveryMode === "mock"
+              ? "Demo mode is active, so no email was sent."
+              : deliveryMode === "apps-script"
+                ? "Your photo request was submitted for "
+                : "Your photo request was sent. Check your inbox and spam folder."}
+            {deliveryMode === "apps-script" && (
+              <>
+                <strong>{submittedRecipient}</strong>. It may take a few
+                minutes.
+              </>
+            )}
+          </p>
+          {deliveryMode !== "mock" && (
+            <ol
+              aria-label="Email next steps"
+              className="capture-journey__next-steps"
+            >
+              <li>Check your inbox.</li>
+              <li>Check your spam folder if it is not there.</li>
+            </ol>
+          )}
+          <button
+            className="capture-journey__primary"
+            onClick={resetJourney}
+            type="button"
+          >
+            Start another participant
+          </button>
+        </div>
       </section>
     );
   }
@@ -287,6 +318,7 @@ export function CaptureJourney({
         nickname: flow.nickname.trim(),
       });
       setDeliveryMode(result.mode);
+      setSubmittedRecipient(maskEmail(flow.email.trim()));
       setFlow((current) =>
         advanceCaptureFlow(current, { type: "send-succeeded" }),
       );

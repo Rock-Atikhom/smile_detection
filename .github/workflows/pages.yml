@@ -41,6 +41,9 @@ jobs:
       - name: Verify vendored vision release
         run: npm run web:vision:check
 
+      - name: Test Apps Script JPEG handling
+        run: npm run apps-script:test
+
       - name: Check web formatting
         run: npm run web:format:check
 

@@ -30,6 +30,14 @@ first name and last name plus the optional nickname supplied by the participant.
 Do not use the `/dev` URL in the website. It is restricted to editors and is not the classroom
 endpoint.
 
+If the project already has a web-app deployment, update it after every code change: choose
+**Deploy → Manage deployments**, edit the existing web app, select **New version**, and deploy.
+Keep the same `/exec` URL. Saving `Code.gs` alone does not update the deployed version.
+
+The JPEG validator normalizes the signed bytes returned by Apps Script's `Utilities.base64Decode`
+before checking the JPEG header. This matters because valid bytes above 127 are represented as
+negative numbers by that service.
+
 ## Configure the GitHub Pages build
 
 In each GitHub repository, add these repository variables under **Settings → Secrets and variables
@@ -51,7 +59,11 @@ Use a non-sensitive photo and a test mailbox. Confirm that:
 2. The request reaches the manager-owned mailbox with the JPEG attached.
 3. Retrying the same idempotency key does not create a duplicate message within 10 minutes.
 4. A missing consent, invalid email, non-JPEG, or oversized payload is rejected.
-5. The public page shows **Photo request submitted**, not a false guarantee of inbox delivery.
+5. The public page shows a **Check your email** confirmation, not a false guarantee of inbox delivery.
+
+If no message arrives, open the Apps Script project and check **Executions** for the exact
+`doPost` run. A successful `GET` health check only proves that the web app is reachable; it does
+not prove that `MailApp.sendEmail` was authorized, had quota, or accepted the attachment.
 
 Apps Script Web Apps do not expose a browser-readable CORS response for this flow, so the frontend
 uses a simple `text/plain` POST with `no-cors`. A network-level success means the request was

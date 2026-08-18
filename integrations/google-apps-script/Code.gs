@@ -117,7 +117,9 @@ function createJpegAttachment(image) {
   if (bytes.length < 4 || bytes.length > MAX_IMAGE_BYTES) {
     throw new Error("image-size-out-of-range");
   }
-  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+  const firstByte = bytes[0] & 0xff;
+  const secondByte = bytes[1] & 0xff;
+  if (firstByte !== 0xff || secondByte !== 0xd8) {
     throw new Error("image-is-not-jpeg");
   }
   return Utilities.newBlob(bytes, "image/jpeg", "smart-smile.jpg");
