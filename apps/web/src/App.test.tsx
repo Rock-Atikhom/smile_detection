@@ -262,13 +262,36 @@ async function makeCameraReadyForFrames() {
 describe("Smart Smile camera session", () => {
   beforeEach(() => {
     resetVision();
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
   });
 
   afterEach(() => {
     cleanup();
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it("switches between light and dark mode and remembers the selection", () => {
+    installCamera(vi.fn());
+    render(<App />);
+
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    const toggle = screen.getByRole("button", {
+      name: "Switch to dark mode",
+    });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(toggle);
+
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(localStorage.getItem("smart-smile-theme")).toBe("dark");
+    expect(
+      screen.getByRole("button", { name: "Switch to light mode" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it.each([

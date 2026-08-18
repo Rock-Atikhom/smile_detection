@@ -167,6 +167,43 @@ h2,
   display: none;
 }
 
+.theme-toggle {
+  display: inline-flex;
+  min-width: 48px;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-medium);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+  font-weight: 620;
+  transition:
+    border-color var(--dur-short) var(--ease-out),
+    background-color var(--dur-short) var(--ease-out),
+    transform var(--dur-short) var(--ease-out);
+}
+
+.theme-toggle:hover {
+  border-color: var(--color-action);
+  background: var(--color-surface-hover);
+}
+
+.theme-toggle:active {
+  transform: translateY(1px);
+}
+
+.theme-toggle__icon {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.theme-toggle__compact {
+  display: none;
+}
+
 .foundation-layout {
   display: grid;
   align-content: center;
@@ -513,6 +550,18 @@ h2 {
 
   .privacy-trigger {
     padding-inline: 14px;
+  }
+
+  .theme-toggle {
+    padding-inline: 14px;
+  }
+
+  .theme-toggle__wide {
+    display: none;
+  }
+
+  .theme-toggle__compact {
+    display: inline;
   }
 
   .privacy-trigger__wide {
@@ -1337,7 +1386,8 @@ h2 {
   .capture-journey__content,
   .capture-journey__option,
   .capture-journey__primary,
-  .capture-journey__secondary {
+  .capture-journey__secondary,
+  .theme-toggle {
     animation: none !important;
     transform: none !important;
     transition: none !important;

@@ -20,6 +20,12 @@ import {
 import { DEFAULT_SMILE_PROFILE } from "./vision/smile-score";
 import type { VerificationPhase } from "./vision/smile-verification";
 import { useVisionRuntime } from "./vision/useVisionRuntime";
+import {
+  applyTheme,
+  readStoredTheme,
+  writeStoredTheme,
+  type Theme,
+} from "./theme";
 
 type Copy = { action?: string; heading: string; text: string };
 
@@ -199,6 +205,33 @@ function PrivacyDisclosure() {
         </ul>
       </NativeDialog>
     </Dialog.Root>
+  );
+}
+
+function ThemeToggle({
+  theme,
+  onToggle,
+}: {
+  theme: Theme;
+  onToggle: () => void;
+}) {
+  const dark = theme === "dark";
+  return (
+    <button
+      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-pressed={dark}
+      className="theme-toggle"
+      onClick={onToggle}
+      type="button"
+    >
+      <span aria-hidden="true" className="theme-toggle__icon">
+        {dark ? "☀" : "◐"}
+      </span>
+      <span className="theme-toggle__wide">
+        {dark ? "Light mode" : "Dark mode"}
+      </span>
+      <span className="theme-toggle__compact">{dark ? "Light" : "Dark"}</span>
+    </button>
   );
 }
 
@@ -502,6 +535,7 @@ export default function App() {
   const { restart, snapshot, start, stop, switchCamera, videoRef } =
     useCameraSession();
   const vision = useVisionRuntime();
+  const [theme, setTheme] = useState<Theme>(() => readStoredTheme() ?? "light");
   const [helpRequest, setHelpRequest] = useState(false);
   const [preflighting, setPreflighting] = useState(false);
   const [firstUseOffline, setFirstUseOffline] = useState(false);
@@ -519,6 +553,16 @@ export default function App() {
   const previousPriorityStatusRef = useRef(false);
   const primaryActionRef = useRef<HTMLButtonElement>(null);
   const recoveryHeadingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+  const toggleTheme = () => {
+    setTheme((current) => {
+      const next = current === "dark" ? "light" : "dark";
+      writeStoredTheme(next);
+      return next;
+    });
+  };
   const stopFaceFramePump = useCallback(() => {
     if (faceFrameTimerRef.current !== null) {
       clearTimeout(faceFrameTimerRef.current);
@@ -815,6 +859,7 @@ export default function App() {
           </a>
           <div className="header-actions">
             <span className="privacy-status">On-device</span>
+            <ThemeToggle onToggle={toggleTheme} theme={theme} />
             <PrivacyDisclosure />
           </div>
         </header>

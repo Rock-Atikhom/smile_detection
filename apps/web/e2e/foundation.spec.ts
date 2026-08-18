@@ -265,6 +265,39 @@ test("preserves Ticket 01 privacy trigger non-text contrast", async ({
   expect(contrast(border, canvas)).toBeGreaterThanOrEqual(3);
 });
 
+test("switches between accessible light and dark themes and remembers the choice", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const root = page.locator("html");
+  const canvasBefore = await root.evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+
+  await expect(
+    page.getByRole("button", { name: "Switch to dark mode" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+
+  await expect(root).toHaveAttribute("data-theme", "dark");
+  await expect(
+    page.getByRole("button", { name: "Switch to light mode" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  const canvasAfter = await root.evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  expect(canvasAfter).not.toBe(canvasBefore);
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("smart-smile-theme")))
+    .toBe("dark");
+
+  await page.reload();
+  await expect(root).toHaveAttribute("data-theme", "dark");
+  await expect(
+    page.getByRole("button", { name: "Switch to light mode" }),
+  ).toBeVisible();
+});
+
 test("does not request camera before the explicit privacy action", async ({
   page,
 }) => {
