@@ -190,13 +190,13 @@ export function CaptureJourney({
         role="status"
       >
         <p className="capture-journey__eyebrow">All set</p>
-        <h2>Photo sent</h2>
+        <h2>Photo request submitted</h2>
         <p>
           {deliveryMode === "mock"
             ? "Demo mode is active, so no email was sent."
             : deliveryMode === "apps-script"
-              ? "Your photo request was submitted. Check your inbox shortly."
-              : "Check your inbox for the Smart Smile photo."}
+              ? "Your request was submitted. Check your inbox and spam folder shortly."
+              : "Check your inbox and spam folder for the Smart Smile photo."}
         </p>
         <button
           className="capture-journey__primary"
