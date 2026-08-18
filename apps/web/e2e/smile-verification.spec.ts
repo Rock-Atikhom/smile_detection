@@ -414,9 +414,14 @@ async function stepReady(page: Page, rawScore: number) {
 }
 
 async function warmToReady(page: Page) {
-  await stepReady(page, 0);
-  await stepReady(page, 0);
-  await stepReady(page, 0);
+  const status = page.getByRole("status", { name: "Camera status" });
+  for (let sample = 0; sample < 6; sample += 1) {
+    await stepReady(page, 0);
+    if ((await status.textContent())?.includes("Smile when you are ready")) {
+      return;
+    }
+  }
+  await expect(status).toContainText("Smile when you are ready");
 }
 
 const progressBar = (page: Page) =>
