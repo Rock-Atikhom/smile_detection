@@ -1,0 +1,11 @@
+services:
+  web:
+    build:
+      context: .
+      args:
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
+        VITE_SMART_SMILE_EMAIL_MODE: ${VITE_SMART_SMILE_EMAIL_MODE:-demo}
+        VITE_SMART_SMILE_EMAIL_ENDPOINT: ${VITE_SMART_SMILE_EMAIL_ENDPOINT:-}
+    ports:
+      - "${SMART_SMILE_PORT:-4173}:80"
+    restart: unless-stopped

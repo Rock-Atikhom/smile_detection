@@ -1,0 +1,14 @@
+.git
+.github
+.gitignore
+node_modules
+apps/web/node_modules
+apps/web/dist
+apps/desktop-reference/.venv
+apps/desktop-reference/.pytest_cache
+*.pyc
+__pycache__
+.DS_Store
+coverage
+playwright-report
+test-results

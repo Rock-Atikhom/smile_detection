@@ -53,6 +53,22 @@ out of date" error. Do **not** regenerate the manifest in that situation; clone 
 `main` branch into a new folder using the commands above. If an older Smart Smile screen still
 appears afterward, clear the browser's site data for localhost once and reopen the Vite URL.
 
+### Docker local setup
+
+Docker provides the same web runtime on macOS, Windows, and Linux. From the repository root,
+run:
+
+```bash
+docker compose up --build
+```
+
+Then open [http://localhost:4173/](http://localhost:4173/) and allow camera access. The default
+Docker build uses demo delivery mode and never sends an email. To test the optional Google Apps
+Script delivery, set `VITE_SMART_SMILE_EMAIL_MODE=apps-script` and
+`VITE_SMART_SMILE_EMAIL_ENDPOINT` before `docker compose up --build`. See the
+[Docker deployment guide](docs/deployment/docker.md) for macOS, Windows PowerShell, and camera
+security notes.
+
 Run the complete web quality gates with:
 
 ```bash

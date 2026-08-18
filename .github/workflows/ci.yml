@@ -105,6 +105,18 @@ jobs:
       - name: Run production-preview browser tests
         run: npm run web:e2e
 
+  docker:
+    name: Docker / Web image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the local web image
+        run: docker build --tag smart-smile:ci .
+
   macos-arm64:
     name: macOS ARM64 / Python 3.12.10
     runs-on: macos-14
