@@ -420,8 +420,8 @@ function coachCopy(snapshot: CameraSnapshot): Copy {
 
 const preparingCopy: Copy = {
   action: "Cancel",
-  heading: "Getting smile detection ready",
-  text: "Required files are verified and stay on this device for offline use",
+  heading: "Getting ready",
+  text: "Verified files stay on this device.",
 };
 
 const firstUseOfflineCopy: Copy = {
@@ -877,7 +877,7 @@ export default function App() {
                           : faceGuidance !== null
                             ? " session-status--warning"
                             : ""
-                      }`}
+                      }${copy.text ? " session-status--with-hint" : ""}`}
                       role="status"
                     >
                       <span
@@ -891,6 +891,11 @@ export default function App() {
                       >
                         {smileStatus ?? copy.heading}
                       </h1>
+                      {copy.text && (
+                        <span className="session-status__hint">
+                          {copy.text}
+                        </span>
+                      )}
                       {offlineAnnouncement && (
                         <span className="visually-hidden">
                           {offlineAnnouncement}

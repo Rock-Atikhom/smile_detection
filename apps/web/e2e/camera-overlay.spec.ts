@@ -207,6 +207,25 @@ test("uses the approved keyboard order in the active session", async ({
   }
 });
 
+test("keeps live guidance visible and interaction motion explicit", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await exposeSecondCamera(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Continue to camera" }).click();
+
+  const status = page.getByRole("status", { name: "Camera status" });
+  await expect(status.locator(".session-status__hint")).toBeVisible();
+  await expect(status.locator(".session-status__hint")).not.toHaveText("");
+
+  const transition = await page
+    .locator(".session-control--stop")
+    .evaluate((element) => getComputedStyle(element).transitionProperty);
+  expect(transition).toContain("transform");
+  expect(transition).not.toBe("all");
+});
+
 test("protects overlay text against light and dark camera frames and removes motion", async ({
   page,
 }) => {

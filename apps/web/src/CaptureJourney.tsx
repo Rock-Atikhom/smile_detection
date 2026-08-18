@@ -414,11 +414,12 @@ export function CaptureJourney({
         ) : (
           <div className="capture-journey__actions">
             <button
-              className="capture-journey__secondary"
-              onClick={resetJourney}
+              className="capture-journey__primary"
+              disabled={treatmentLoading !== null}
+              onClick={() => setEmailStep(true)}
               type="button"
             >
-              Retake
+              Use this photo
             </button>
             <button
               className="capture-journey__secondary"
@@ -428,12 +429,11 @@ export function CaptureJourney({
               Download photo
             </button>
             <button
-              className="capture-journey__primary"
-              disabled={treatmentLoading !== null}
-              onClick={() => setEmailStep(true)}
+              className="capture-journey__secondary"
+              onClick={resetJourney}
               type="button"
             >
-              Use this photo
+              Retake
             </button>
           </div>
         )}

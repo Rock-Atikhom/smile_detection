@@ -416,12 +416,10 @@ describe("Smart Smile camera session", () => {
 
     await waitFor(() => expect(vision.prepare).toHaveBeenCalledOnce());
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "Getting smile detection ready",
+      "Getting ready",
     );
     expect(
-      screen.getByText(
-        "Required files are verified and stay on this device for offline use",
-      ),
+      screen.getByText("Verified files stay on this device."),
     ).toBeVisible();
     expect(getUserMedia).not.toHaveBeenCalled();
 
@@ -932,8 +930,11 @@ describe("Smart Smile camera session", () => {
     const overlay = await screen.findByRole("region", {
       name: "Live camera controls",
     });
+    expect(
+      within(overlay).getByRole("heading", { name: "Getting ready" }),
+    ).toBeVisible();
     expect(within(overlay).getByRole("status")).toHaveTextContent(
-      /^Getting ready$/,
+      "Hold the device steady while the camera settles.",
     );
     expect(screen.queryByText("Private by design")).not.toBeInTheDocument();
 
@@ -1273,7 +1274,7 @@ describe("Smart Smile camera session", () => {
       screen.queryByRole("heading", { name: "Camera ready" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Getting smile detection ready" }),
+      screen.getByRole("heading", { name: "Getting ready" }),
     ).toBeVisible();
 
     Object.assign(vision.snapshot, { runtime: "idle" });
@@ -1282,7 +1283,7 @@ describe("Smart Smile camera session", () => {
       screen.queryByRole("heading", { name: "Camera ready" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Getting smile detection ready" }),
+      screen.getByRole("heading", { name: "Getting ready" }),
     ).toBeVisible();
 
     Object.assign(vision.snapshot, {
